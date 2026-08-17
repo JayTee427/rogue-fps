@@ -50,9 +50,13 @@ export class EnemyManager {
     this.list = []; this.projectiles = []; this.shards = [];
   }
 
-  spawnRoom(rng, floor, roomIndex, arena, mods, eliteCount) {
+  /** Build the room's full roster, but only place the first `firstWave` of them.
+   *  The rest are returned already rolled — same elites, same affixes — for the
+   *  director to release later. Pacing must not cost the room its elites. */
+  spawnRoom(rng, floor, roomIndex, arena, mods, eliteCount, firstWave = Infinity) {
     const roster = rollRoster(rng, floor, roomIndex, mods);
     const swarmHp = mods.swarm ? 0.5 : 1;
+    const deferred = [];
     roster.forEach((id, i) => {
       const elite = i < eliteCount;
       const affix = elite ? rollAffix(rng, floor) : null;
@@ -62,9 +66,14 @@ export class EnemyManager {
       const ang = rng.next() * Math.PI * 2, rad = 9 + rng.next() * 8;
       const x = THREE.MathUtils.clamp(Math.cos(ang) * rad, -arena.halfW + 1.5, arena.halfW - 1.5);
       const z = THREE.MathUtils.clamp(Math.sin(ang) * rad, -arena.halfD + 1.5, arena.halfD - 1.5);
-      this.spawn(data, x, z, elite);
+      if (i < firstWave) this.spawn(data, x, z, elite);
+      else deferred.push({ data, x, z, elite });
     });
+    return { roster, deferred };
   }
+
+  /** Place one enemy the director held back. */
+  spawnDeferred(d) { return this.spawn(d.data, d.x, d.z, d.elite); }
 
   spawn(data, x, z, elite = false) {
     const look = LOOKS[data.archetype];

@@ -103,6 +103,7 @@
     .card:hover, .card:active { transform: translateY(-3px); border-color: var(--fg); }
     .card .rar { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; }
     .card .flav{font-size:11px;line-height:1.45;font-style:italic;opacity:.5;margin-top:8px;border-top:1px solid rgba(255,255,255,.07);padding-top:7px}
+    #chalLine{position:fixed;top:34px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.12em;color:#ffd23a;opacity:.85;text-shadow:0 0 8px rgba(255,210,58,.4);pointer-events:none}
     .card h3 { margin: 6px 0 8px; font-size: 18px; letter-spacing: .04em; }
     .card p { font-size: 13px; color: var(--dim); line-height: 1.45; }
     .card.common .rar { color: var(--dim); } .card.uncommon .rar { color: var(--fg); }
@@ -155,6 +156,7 @@
     <div id="crosshair"></div>
     <div id="dmgflash"></div>
     <div id="floor"><b id="floorNum">FLOOR 1</b> · <span id="roomNum">ROOM 1/5</span> · <span id="modName"></span></div>
+    <div id="chalLine"></div>
     <div id="items"></div>
     <div id="perf"></div>
     <div class="bar"><div class="track"><div id="hpFill" class="fill"></div></div><div class="track" style="margin-top:4px;height:5px"><div id="shFill" class="fill shield" style="width:0%"></div></div><div class="label"><span id="hpText">100</span> HP</div></div>

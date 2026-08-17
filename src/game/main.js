@@ -14,6 +14,8 @@ import { ITEM_BY_ID } from "core/items.js";
 import { flavourFor } from "core/codex.js";
 import { scaleEnemy } from "core/enemies.js";
 import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
+import { planEncounter, updateSkill } from "core/director.js";
+import { rollChallenge, checkChallenge } from "core/challenges.js";
 
 import { createRenderer, buildArena, COLORS } from "./renderer.js";
 import { Player } from "./player.js";
@@ -63,6 +65,10 @@ const G = {
   lastFrame: performance.now(), best: Number(localStorage.getItem("hs_best") || 0),
   fpsAcc: 0, fpsN: 0, seedText: "",
   qTier: tierName, qWindow: [], qCooldown: 3,
+  // director: a running read on how well the player is doing, persisted so a
+  // run starts where the last one left off rather than assuming average.
+  skill: Number(localStorage.getItem("hs_skill") ?? 0.5),
+  wavePlan: null, challenge: null, roomStats: null,
 };
 
 // --- adaptive quality -------------------------------------------------------
@@ -96,6 +102,40 @@ function applyQuality(tier) {
   if (R.bloom) R.bloom.enabled = tier !== "low";
   renderer.shadowMap.enabled = !!t.shadows;
   $("#perf").dataset.tier = tier;
+}
+
+// --- director: enemies arrive in waves, paced to how you are actually doing ---
+function pumpWaves(dt) {
+  const wp = G.wavePlan;
+  if (!wp || wp.next >= wp.waves.length) return;
+  wp.t += dt;
+  while (wp.next < wp.waves.length && wp.waves[wp.next].delay <= wp.t) {
+    for (const d of wp.waves[wp.next].spawns) enemies.spawnDeferred(d);
+    if (wp.next > 0) { toast("REINFORCEMENTS", true, 1200); SFX.door(); }
+    wp.next++;
+  }
+}
+
+/** Are there enemies still to come? The room is not clear until the plan is spent. */
+function wavesPending() {
+  const wp = G.wavePlan;
+  return !!wp && wp.next < wp.waves.length;
+}
+
+function roomChallengeStart(rng, floor) {
+  G.challenge = rollChallenge(rng, floor);
+  G.roomStats = { kills: 0, headshots: 0, damageTaken: 0, reloads: 0, secs: 0, dashes: 0, shotsFired: 0, shotsHit: 0, itemsTaken: 0 };
+  const line = $("#chalLine");
+  if (line) line.textContent = G.challenge ? `${G.challenge.name.toUpperCase()} — ${G.challenge.desc}` : "";
+}
+
+function roomChallengeEnd() {
+  const line = $("#chalLine");
+  if (line) line.textContent = "";
+  const ch = G.challenge;
+  G.challenge = null;
+  if (!ch || !G.roomStats) return null;
+  return checkChallenge(ch, G.roomStats) ? ch : null;
 }
 
 function toast(text, warn = false, ms = 1400) {
@@ -147,7 +187,29 @@ function enterRoom() {
   player.yaw = 0; player.pitch = 0;
   applyStats();
   enemies.clear();
-  enemies.spawnRoom(seedRng.fork("enemies"), r.floor, r.roomIndex, G.arena, G.mods, room.eliteCount);
+  // The director decides how the roster ARRIVES; spawnRoom still decides WHO it
+  // is, so elites and affixes are untouched by the pacing layer. Roll everyone
+  // first (firstWave 0 places nobody), then plan over the actual roster — the
+  // plan cannot be made before the roster exists.
+  const { deferred } = enemies.spawnRoom(seedRng.fork("enemies"), r.floor, r.roomIndex, G.arena, G.mods, room.eliteCount, 0);
+  const plan = planEncounter(seedRng.fork("director"), {
+    floor: r.floor, roomIndex: r.roomIndex, skill: G.skill,
+    roster: deferred.map((_, i) => String(i)),
+  });
+  let waves = plan.waves.map((w) => ({
+    delay: w.delay === 0 ? 0 : w.delay + 2,       // the opening wave is instant
+    spawns: w.ids.map((i) => deferred[Number(i)]).filter(Boolean),
+  }));
+  // A small roster split four ways leaves you alone in a room waiting for the
+  // next single enemy, which is the opposite of pressure. Under 6 enemies, the
+  // room is an opener plus one reinforcement, not a trickle.
+  if (deferred.length < 6 && waves.length > 2) {
+    const [first, ...rest] = waves;
+    waves = [first, { delay: rest[0].delay, spawns: rest.flatMap((w) => w.spawns) }];
+  }
+  G.wavePlan = { t: 0, next: 0, waves };
+  pumpWaves(0);                                    // place the opening wave now
+  roomChallengeStart(seedRng.fork("challenge"), r.floor);
   hazards.spawn(seedRng.fork("hazards"), room.hazardTag, G.arena, r.floor);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
   $("#bossbar").classList.add("hidden");
@@ -198,6 +260,13 @@ function applyStats() {
 
 function onRoomCleared() {
   G.roomCleared = true; G.roomActive = false;
+  G.wavePlan = null;
+  // Rate the room and let the director push harder or ease off next time.
+  const st = G.roomStats ?? {};
+  G.skill = updateSkill(G.skill, { clearedSecs: st.secs ?? 0, damageTaken: st.damageTaken ?? 0, accuracy: st.shotsFired ? st.shotsHit / st.shotsFired : 0.5 });
+  localStorage.setItem("hs_skill", String(G.skill));
+  const won = roomChallengeEnd();
+  if (won) { toast(`CHALLENGE — ${won.name}`, false, 2400); SFX.pickup(); G.challengeReward = won; }
   SFX.roomClear();
   toast("ROOM CLEAR — reach the exit");
   G.arena.exit.material.opacity = 0.75;
@@ -344,6 +413,7 @@ function renderItems() {
 
 // ---------------------------------------------------------------- damage --
 function damagePlayer(amount, why = "?") {
+  if (G.roomStats) G.roomStats.damageTaken += amount;
   if (G.invuln > 0 || !G.roomActive) return;
   if (window.__dbg) (window.__dmgLog ??= []).push({ t: Math.round(performance.now()), amount: Math.round(amount * 10) / 10, why, hp: Math.round(G.hp) });
   const s = G.run.stats;
@@ -430,6 +500,7 @@ function fire(want, dt) {
 function onKill(e, res) {
   const s = G.run.stats;
   G.killsThisRoom++;
+  if (G.roomStats) G.roomStats.kills++;
   fx.kill(e.mesh.position); fx.trauma(0.28); duckMusic(0.3, 0.2); G.hitstop = Math.max(G.hitstop, 0.05);
   heal(s.healOnKill ?? 0);
   if (s.dashOnKill) player.dashCd = 0;
@@ -440,7 +511,7 @@ function onKill(e, res) {
     G.roomActive = false; G.roomCleared = true; toast("BOSS DOWN", false, 1800); G.arena.exit.material.opacity = 0.75;
     return;
   }
-  if (!G.bossMode && enemies.aliveCount === 0) onRoomCleared();
+  if (!G.bossMode && enemies.aliveCount === 0 && !wavesPending()) onRoomCleared();
 }
 
 // Each attack shape resolves to something the player can see and react to. The
@@ -534,8 +605,8 @@ function frame(now) {
         else if (ev.type === "bossTelegraph") { toast(ev.text, true, Math.round(ev.secs * 1000)); SFX.ui(); }
         else if (ev.type === "bossAttack") { onBossAttack(ev); }
         else if (ev.type === "dropMine") { hazards.addMine(ev.x, ev.z, ev.damage); SFX.ui(); }
-        else if (ev.type === "popperBoom") { const d = player.pos.distanceTo(ev.pos); if (d < ev.r) damagePlayer(ev.dmg * (1 - d / ev.r), "popper"); explode(ev.pos, ev.r, ev.dmg * 0.5); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
-        else if (ev.type === "kill") { if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
+        else if (ev.type === "popperBoom") { const d = player.pos.distanceTo(ev.pos); if (d < ev.r) damagePlayer(ev.dmg * (1 - d / ev.r), "popper"); explode(ev.pos, ev.r, ev.dmg * 0.5); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive && !wavesPending()) onRoomCleared(); }
+        else if (ev.type === "kill") { if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive && !wavesPending()) onRoomCleared(); }
       }
       if (G.mods.timePressure && G.roomActive) { G.roomTimer -= dt; if (G.roomTimer <= 0) { damagePlayer(9999, "timer"); } }
       // hazards (turrets, mines, lava, acid, collapsing) — logic in core, drawn by hazardView
@@ -590,6 +661,7 @@ function frame(now) {
     $("#dmgflash").classList.toggle("on", G.dmgFlash > 0.05 || (G.hp / G.run.maxHp) < 0.25 && Math.sin(now / 120) > 0);
     if (G.mods.timePressure && G.roomActive) $("#modName").textContent = `COUNTDOWN ${Math.ceil(G.roomTimer)}`;
     // fps counter (dev)
+    if (G.roomActive && !G.bossMode) { pumpWaves(dt); if (G.roomStats) G.roomStats.secs += dt; }
     governQuality(dt || 0.016);
     G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${G.qTier.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
   }
