@@ -7,6 +7,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { TIERS } from "core/quality.js";
 
 export const COLORS = {
@@ -79,12 +80,39 @@ export function createRenderer(container, tierName) {
   // Bloom is what makes emissive trims, muzzle flash, tracers and enemy glow read
   // as light rather than as bright paint. It is the single biggest lever for a
   // stylised look, and it is cheap enough for medium tier; low tier skips it.
-  let composer = null, bloom = null;
+  let composer = null, bloom = null, grade = null;
   if (tier.bloom !== false && tierName !== "low") {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.6, 0.82);
+    bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.78, 0.7, 0.55);
     composer.addPass(bloom);
+
+    // Final grade: saturation, a cool-shadow/warm-highlight tint, a vignette and
+    // a red edge-flash on damage. Bloom alone left everything flat and untouched.
+    grade = new ShaderPass({
+      uniforms: {
+        tDiffuse: { value: null }, uVignette: { value: 0.52 },
+        uDamage: { value: 0.0 }, uTime: { value: 0.0 }, uSat: { value: 1.12 },
+      },
+      vertexShader: `varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform sampler2D tDiffuse;
+uniform float uVignette; uniform float uDamage; uniform float uTime; uniform float uSat;
+varying vec2 vUv;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+void main() {
+  vec3 col = texture2D(tDiffuse, vUv).rgb;
+  col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, uSat);
+  float luma = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(col * vec3(0.88, 0.92, 1.0), col * vec3(1.0, 0.96, 0.9), smoothstep(0.0, 1.0, luma * 1.4));
+  float d = distance(vUv, vec2(0.5));
+  col *= smoothstep(0.95, 0.25, d * uVignette);
+  col += vec3(1.0, 0.08, 0.08) * uDamage * 0.5 * smoothstep(0.25, 0.8, d);
+  col += (hash(vUv * 800.0 + uTime * 0.5) - 0.5) * 0.012;
+  gl_FragColor = vec4(col, 1.0);
+}`,
+    });
+    composer.addPass(grade);
     composer.addPass(new OutputPass());
     // the composer owns tone mapping now
     renderer.toneMapping = THREE.NoToneMapping;
@@ -98,9 +126,12 @@ export function createRenderer(container, tierName) {
   };
   window.addEventListener("resize", onResize);
 
-  const render = () => { if (composer) composer.render(); else renderer.render(scene, camera); };
+  const render = () => {
+    if (grade) grade.uniforms.uTime.value = performance.now() * 0.001;
+    if (composer) composer.render(); else renderer.render(scene, camera);
+  };
 
-  return { renderer, scene, camera, tier, composer, bloom, render, dispose() { window.removeEventListener("resize", onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, tier, composer, bloom, grade, render, dispose() { window.removeEventListener("resize", onResize); renderer.dispose(); } };
 }
 
 const flat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
@@ -204,4 +235,41 @@ export function buildArena(scene, rng, opts = {}) {
 
   scene.add(g);
   return { group: g, halfW, halfD, blocks, exit, exitPos: exit.position.clone(), dispose() { scene.remove(g); g.traverse(o => { o.geometry?.dispose(); }); } };
+}
+
+// Set dressing. core/dressing.js decides WHERE everything sits (deterministically,
+// from the room seed); this only decides what it looks like. Shared geometry and
+// materials across every prop of a kind, so a fully dressed room is a handful of
+// draw calls rather than eighty.
+const PROP_GEO = {};
+const PROP_MAT = {};
+function propAssets(kind, spec) {
+  if (!PROP_GEO[kind]) {
+    PROP_GEO[kind] = kind === "hanging_cable"
+      ? new THREE.CylinderGeometry(0.03, 0.03, spec.h, 4)
+      : kind === "barrel"
+        ? new THREE.CylinderGeometry(spec.w / 2, spec.w / 2, spec.h, 8)
+        : new THREE.BoxGeometry(spec.w, spec.h, spec.d);
+    PROP_MAT[kind] = spec.emissive
+      ? new THREE.MeshBasicMaterial({ color: kind === "strip_light" ? 0xbfe6ff : 0x7fd4ff })
+      : new THREE.MeshLambertMaterial({ color: kind === "crate" ? 0x6b5f4e : kind === "barrel" ? 0x4a5a63 : 0x3e4550, flatShading: true });
+  }
+  return [PROP_GEO[kind], PROP_MAT[kind]];
+}
+
+export function buildDressing(scene, props, kinds) {
+  const group = new THREE.Group();
+  for (const p of props) {
+    const spec = kinds[p.kind];
+    if (!spec) continue;
+    const [geo, mat] = propAssets(p.kind, spec);
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(p.x, p.y, p.z);
+    m.rotation.y = p.rotY;
+    m.scale.setScalar(p.scale);
+    if (!spec.emissive) { m.castShadow = false; m.receiveShadow = true; }
+    group.add(m);
+  }
+  scene.add(group);
+  return group;
 }

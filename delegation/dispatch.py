@@ -53,6 +53,11 @@ CORE_RULES = """Rules for every module in src/core (these are enforced by tests)
 - Deterministic: same inputs and same rng seed => identical output.
 - Data in, data out: plain objects/arrays. Never mutate an argument.
 - Import siblings by their alias path, e.g. `import { ITEMS } from "core/items.js"`.
+- Import NOTHING you do not actually use, and never import the rng: it arrives as an
+  argument. `import { RNG } from "core/rng.js"` is wrong twice over — the export is
+  `rng`, not `RNG`, and you do not need it. Vitest tolerates a bad named import; the
+  browser refuses to load the module. Three delegated modules have shipped this exact
+  line.
 - Keep it under about 200 lines. One sharp implementation, not exhaustive
   variants. A file that runs on gets cut off before it ends and cannot parse."""
 

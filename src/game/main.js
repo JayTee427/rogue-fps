@@ -16,13 +16,14 @@ import { scaleEnemy } from "core/enemies.js";
 import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
 import { planEncounter, updateSkill } from "core/director.js";
 import { rollChallenge, checkChallenge } from "core/challenges.js";
+import { layoutDressing, PROP_KINDS } from "core/dressing.js";
 
-import { createRenderer, buildArena, COLORS } from "./renderer.js";
+import { createRenderer, buildArena, buildDressing, COLORS } from "./renderer.js";
 import { Player } from "./player.js";
 import { Input } from "./input.js";
 import { WeaponView } from "./weaponView.js";
 import { EnemyManager } from "./enemies.js";
-import { initAudio, resumeAudio, SFX, duckMusic } from "./audio.js";
+import { initAudio, resumeAudio, SFX, duckMusic, setListener, at as playAt, footstep } from "./audio.js";
 import { MusicPlayer } from "./musicPlayer.js";
 import { FX } from "./fx.js";
 import { HazardView } from "./hazardView.js";
@@ -211,6 +212,8 @@ function enterRoom() {
   pumpWaves(0);                                    // place the opening wave now
   roomChallengeStart(seedRng.fork("challenge"), r.floor);
   hazards.spawn(seedRng.fork("hazards"), room.hazardTag, G.arena, r.floor);
+  G.dressing?.removeFromParent();
+  G.dressing = buildDressing(scene, layoutDressing(seedRng.fork("dressing"), G.arena, r.floor), PROP_KINDS);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
   $("#bossbar").classList.add("hidden");
   music?.setBoss(false);
@@ -266,7 +269,16 @@ function onRoomCleared() {
   G.skill = updateSkill(G.skill, { clearedSecs: st.secs ?? 0, damageTaken: st.damageTaken ?? 0, accuracy: st.shotsFired ? st.shotsHit / st.shotsFired : 0.5 });
   localStorage.setItem("hs_skill", String(G.skill));
   const won = roomChallengeEnd();
-  if (won) { toast(`CHALLENGE — ${won.name}`, false, 2400); SFX.pickup(); G.challengeReward = won; }
+  if (won) {
+    // Pay it out. Awarding a challenge and then giving nothing is worse than
+    // never offering one.
+    toast(`CHALLENGE — ${won.name} · +${won.rewardAmount} ${won.reward}`, false, 2800);
+    SFX.pickup();
+    if (won.reward === "heal") G.hp = Math.min(G.run.maxHp, G.hp + won.rewardAmount);
+    else if (won.reward === "gold") G.run = { ...G.run, gold: (G.run.gold ?? 0) + won.rewardAmount };
+    else if (won.reward === "reroll") G.run = { ...G.run, rerolls: (G.run.rerolls ?? 0) + won.rewardAmount };
+    else G.pendingBonusItem = won.rewardAmount;   // consumed by the next draft
+  }
   SFX.roomClear();
   toast("ROOM CLEAR — reach the exit");
   G.arena.exit.material.opacity = 0.75;
@@ -472,7 +484,8 @@ function fire(want, dt) {
       const hitPos = origin.clone().addScaledVector(ray.dir, h.t);
       fx.hit(hitPos, ray.dir, res.crit);
       fx.number(res.damage, h.e.mesh.position, res.crit ? "crit" : "hit", h.e.mesh.uuid);
-      if (res.crit) { SFX.crit(); G.hitstop = Math.max(G.hitstop, 0.09); fx.trauma(0.22); } else SFX.hit();
+      const hp3 = hit.e.mesh.position;
+      if (res.crit) { playAt(hp3, () => SFX.crit()); G.hitstop = Math.max(G.hitstop, 0.09); fx.trauma(0.22); } else playAt(hp3, () => SFX.hit());
       // Static Charge / Arc mod: every Nth hit chains lightning through nearby enemies
       if (s.chainEveryN > 0) {
         G.hitCount = (G.hitCount ?? 0) + 1;
@@ -548,7 +561,7 @@ function onBossAttack(ev) {
         const m = scaleEnemy("skitter", r.floor, 4, null);
         enemies.spawn(m, p.x + dx, p.z + 2, false);
       }
-      SFX.bossRoar();
+      playAt(p, () => SFX.bossRoar());     // it comes from the boss, not your head
       break;
     }
     default: {                                  // spore_cloud and anything new
@@ -662,6 +675,15 @@ function frame(now) {
     if (G.mods.timePressure && G.roomActive) $("#modName").textContent = `COUNTDOWN ${Math.ceil(G.roomTimer)}`;
     // fps counter (dev)
     if (G.roomActive && !G.bossMode) { pumpWaves(dt); if (G.roomStats) G.roomStats.secs += dt; }
+    // Ears follow the camera, or HRTF panning does nothing at all.
+    setListener(camera.position, -Math.sin(player.yaw), -Math.cos(player.yaw));
+    if (R.grade) R.grade.uniforms.uDamage.value = G.dmgFlash * 0.55;
+    // Footfalls, paced by actual ground speed.
+    const gsp = Math.hypot(player.vel.x, player.vel.z);
+    if (gsp > 1.5 && (player.grounded ?? true)) {
+      G.stepPhase = (G.stepPhase ?? 0) + dt * gsp * 0.42;
+      if (G.stepPhase >= 1) { G.stepPhase = 0; footstep(gsp / 7); }
+    }
     governQuality(dt || 0.016);
     G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${G.qTier.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
   }

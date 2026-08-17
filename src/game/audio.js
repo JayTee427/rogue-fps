@@ -8,6 +8,12 @@ let master = null;
 let muted = false;
 let ambient = null;
 let musicBus = null;
+let reverb = null;
+let wet = null;
+// Where voices connect. Normally the dry master; SFX.at() swaps in a panner so
+// the SAME voice code can be positioned instead of duplicating every sound.
+let routeTo = null;
+const dest = () => routeTo ?? master;
 
 export function initAudio() {
   if (ctx) return;
@@ -15,14 +21,25 @@ export function initAudio() {
   master = ctx.createGain();
   master.gain.value = 0.35;
   const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -12;
-  comp.ratio.value = 4;
+  comp.threshold.value = -8;
+  comp.ratio.value = 2.5;
   master.connect(comp);
   comp.connect(ctx.destination);
   // Music sits on its own bus, ducked below SFX so cues always cut through.
   musicBus = ctx.createGain();
   musicBus.gain.value = 0.5;
   musicBus.connect(comp);
+  // A derelict station has a tail. The impulse response is generated, not loaded:
+  // noise under an exponential decay is a convincing room and costs no download.
+  const irLen = Math.ceil(ctx.sampleRate * 1.8);
+  const ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.4);
+  }
+  reverb = ctx.createConvolver(); reverb.buffer = ir;
+  wet = ctx.createGain(); wet.gain.value = 0.22;
+  wet.connect(reverb); reverb.connect(comp);      // to comp, not master: never ducked twice
 }
 
 /** Accessors for the music player — it needs the same context and its own bus. */
@@ -35,6 +52,60 @@ export function duckMusic(amount = 0.35, secs = 0.25) {
   musicBus.gain.cancelScheduledValues(t);
   musicBus.gain.setValueAtTime(base * (1 - amount), t);
   musicBus.gain.linearRampToValueAtTime(base, t + secs);
+}
+
+/** Point the listener at the camera each frame — without this HRTF does nothing. */
+export function setListener(pos, forwardX, forwardZ) {
+  if (!ctx || !ctx.listener) return;
+  const l = ctx.listener;
+  if (l.positionX) {
+    l.positionX.value = pos.x; l.positionY.value = pos.y; l.positionZ.value = pos.z;
+    l.forwardX.value = forwardX; l.forwardY.value = 0; l.forwardZ.value = forwardZ;
+    l.upX.value = 0; l.upY.value = 1; l.upZ.value = 0;
+  } else {
+    l.setPosition(pos.x, pos.y, pos.z);
+    l.setOrientation(forwardX, 0, forwardZ, 0, 1, 0);
+  }
+}
+
+function panner(x, y, z) {
+  const p = ctx.createPanner();
+  p.panningModel = "HRTF"; p.distanceModel = "inverse";
+  p.refDistance = 4; p.maxDistance = 60; p.rolloffFactor = 1.2;
+  if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; }
+  else p.setPosition(x, y, z);
+  // Distance dulls a sound as well as quieting it. Without this, a far-off shot
+  // is just a small version of a near one, which reads as fake.
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 22050;
+  lp.connect(p);
+  p.connect(master); p.connect(wet);
+  lp.distanceRef = p;
+  return lp;
+}
+
+/** Play any existing SFX at a world position: SFX.at(pos, () => SFX.hit()). */
+export function at(pos, fn) {
+  if (!ctx || muted) return;
+  const prev = routeTo;
+  const node = panner(pos.x, pos.y ?? 1, pos.z);
+  // Close the filter with distance from the listener.
+  const l = ctx.listener, lx = l.positionX ? l.positionX.value : 0, lz = l.positionZ ? l.positionZ.value : 0;
+  const dist = Math.hypot(pos.x - lx, pos.z - lz);
+  node.frequency.value = Math.max(800, 22050 - dist * 380);
+  routeTo = node;
+  try { fn(); } finally { routeTo = prev; }
+}
+
+/** A quiet footfall. Movement should be audible — silence reads as floating. */
+export function footstep(speed = 1) {
+  if (!ctx || muted) return;
+  const t = ctx.currentTime;
+  const n = noise(0.09, "lowpass", 420 + speed * 140, 1, 0.075 * Math.min(1.4, speed));
+  n.g.gain.setValueAtTime(0.075 * Math.min(1.4, speed), t);
+  n.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.085);
+  n.src.start(t);
 }
 
 export function resumeAudio() {
@@ -65,14 +136,14 @@ function noise(dur, filterType = null, freq = 0, Q = 1, gain = 1) {
   if (filterType) {
     const f = ctx.createBiquadFilter();
     f.type = filterType;
-    f.frequency.setValueAtTime(freq, ctx.currentTime);
+    f.frequency.setValueAtTime(freq * (0.9 + Math.random() * 0.2), ctx.currentTime);
     f.Q.value = Q;
     src.connect(f);
     f.connect(g);
   } else {
     src.connect(g);
   }
-  g.connect(master);
+  g.connect(dest());
   return { src, g };
 }
 
@@ -80,10 +151,10 @@ function osc(type, f0, t, dur, gain = 0.6, glideTo = null) {
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;
-  o.frequency.setValueAtTime(f0, t);
+  o.frequency.setValueAtTime(f0 * (0.94 + Math.random() * 0.12), t);   // no two shots identical
   if (glideTo != null) o.frequency.exponentialRampToValueAtTime(Math.max(20, glideTo), t + dur);
   env(g, t, 0.003, dur * 0.7, 0.2, dur * 0.3, gain);
-  o.connect(g).connect(master);
+  o.connect(g).connect(dest());
   o.start(t);
   o.stop(t + dur + 0.1);
   return { o, g };
@@ -187,7 +258,7 @@ export const SFX = {
     const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 1.2;
     f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(220, t + 0.18);
     const g = ctx.createGain(); env(g, t, 0.01, 0.1, 0.1, 0.07, 0.5);
-    src.connect(f).connect(g).connect(master); src.start(t);
+    src.connect(f).connect(g).connect(dest()); src.start(t);
   },
   jump() {
     if (!ctx || muted) return;
@@ -227,7 +298,7 @@ export const SFX = {
     og.gain.setValueAtTime(0.0001, t);
     og.gain.linearRampToValueAtTime(0.5 * sz, t + 0.012);
     og.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
-    o.connect(og); og.connect(master);
+    o.connect(og); og.connect(dest());
     o.start(t); o.stop(t + 0.45);
     // body: noise through a filter that closes as it decays
     const n = noise(0.45, "lowpass", 2400, 1, 0.5 * sz);
@@ -288,7 +359,7 @@ export const SFX = {
     o.frequency.setValueAtTime(250, t);
     o.frequency.exponentialRampToValueAtTime(1300, t + 0.65);
     env(g, t, 0.01, 0.5, 0.1, 0.15, 0.3);
-    o.connect(f).connect(g).connect(master);
+    o.connect(f).connect(g).connect(dest());
     o.start(t);
     o.stop(t + 0.8);
   },
@@ -311,7 +382,7 @@ export const SFX = {
     o.type = "sawtooth";
     o.frequency.setValueAtTime(70, t);
     env(g, t, 0.01, 0.5, 0.1, 0.2, 0.6);
-    o.connect(f).connect(g).connect(master);
+    o.connect(f).connect(g).connect(dest());
     lfo.start(t);
     o.start(t);
     o.stop(t + 0.8);
@@ -340,7 +411,7 @@ export const SFX = {
     lfo.connect(lfoG);
     lfoG.connect(o.frequency);
     env(g, t, 0.01, 0.2, 0.1, 0.1, 0.3);
-    o.connect(g).connect(master);
+    o.connect(g).connect(dest());
     lfo.start(t);
     o.start(t);
     o.stop(t + 0.4);
@@ -363,17 +434,30 @@ export const SFX = {
     d1.type = "sine";
     d1.frequency.setValueAtTime(42, t);
     g1.gain.value = 0.05;
-    d1.connect(g1).connect(master);
+    d1.connect(g1).connect(dest());
     d1.start(t);
     ambient.d1 = d1;
     ambient.g1 = g1;
+    // A drone that never changes stops being heard after a minute. A very slow
+    // LFO on level and pitch keeps the station feeling alive without a melody.
+    const ambLfo = ctx.createOscillator(), ambLfoG = ctx.createGain();
+    ambLfo.type = "sine"; ambLfo.frequency.value = 0.05;   // one cycle per 20 seconds
+    ambLfoG.gain.value = 0.022;
+    ambLfo.connect(ambLfoG).connect(g1.gain);
+    ambLfo.start(t);
+    const ambDrift = ctx.createOscillator(), ambDriftG = ctx.createGain();
+    ambDrift.type = "sine"; ambDrift.frequency.value = 0.031;
+    ambDriftG.gain.value = 3.5;                            // +/- 3.5 Hz of drift
+    ambDrift.connect(ambDriftG).connect(d1.frequency);
+    ambDrift.start(t);
+    ambient.ambLfo = ambLfo; ambient.ambDrift = ambDrift;
 
     const d2 = ctx.createOscillator();
     const g2 = ctx.createGain();
     d2.type = "sine";
     d2.frequency.setValueAtTime(44, t);
     g2.gain.value = 0.03;
-    d2.connect(g2).connect(master);
+    d2.connect(g2).connect(dest());
     d2.start(t);
     ambient.d2 = d2;
     ambient.g2 = g2;
@@ -396,7 +480,7 @@ export const SFX = {
     lfo.connect(lfoG);
     lfoG.connect(g3.gain);
     g3.gain.value = 0.02;
-    ns.connect(f).connect(g3).connect(master);
+    ns.connect(f).connect(g3).connect(dest());
     lfo.start(t);
     ns.start(t);
     ambient.ns = ns;
