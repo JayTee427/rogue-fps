@@ -1,0 +1,390 @@
+// HOLLOW SIGNAL — the game loop. Ties core (delegated, tested) to the shell.
+// core decides what is true; this file decides what you see, hear, and feel.
+
+import * as THREE from "three";
+import { rng as makeRng } from "core/rng.js";
+import { newRun, startFloor, clearRoom, takeReward, chooseDoor, beatBoss, extract, die, canExtract } from "core/run.js";
+import { resolveHit } from "core/combat.js";
+import { ROOM_MODIFIERS, BOSSES } from "core/floor.js";
+import { scoreRun } from "core/score.js";
+import { dailySeed, formatSeed, parseSeed } from "core/daily.js";
+import { pickQualityTier } from "core/quality.js";
+import { aimAssist } from "core/assist.js";
+import { ITEM_BY_ID } from "core/items.js";
+import { scaleEnemy } from "core/enemies.js";
+
+import { createRenderer, buildArena, COLORS } from "./renderer.js";
+import { Player } from "./player.js";
+import { Input } from "./input.js";
+import { WeaponView } from "./weaponView.js";
+import { EnemyManager } from "./enemies.js";
+import { initAudio, resumeAudio, SFX } from "./audio.js";
+
+// ------------------------------------------------------------------ boot --
+const $ = (s) => document.querySelector(s);
+const show = (id) => { for (const l of document.querySelectorAll(".layer")) l.classList.add("hidden"); if (id) $(id).classList.remove("hidden"); };
+
+function benchmark() {
+  const t0 = performance.now();
+  let x = 0; for (let i = 0; i < 2_000_000; i++) x += Math.sqrt(i) * Math.sin(i);
+  return performance.now() - t0 + (x === 42 ? 1 : 0);
+}
+const isMobile = matchMedia("(pointer: coarse)").matches;
+const tierName = pickQualityTier(benchmark(), { mobile: isMobile, deviceMemory: navigator.deviceMemory });
+const R = createRenderer($("#app"), tierName);
+const { renderer, scene, camera } = R;
+$("#perf").textContent = `${tierName.toUpperCase()} · ${isMobile ? "TOUCH" : "KBM"}`;
+
+const player = new Player(camera);
+const input = new Input(renderer.domElement, $("#hud"));
+const weaponView = new WeaponView(camera, scene);
+const enemies = new EnemyManager(scene);
+
+// ------------------------------------------------------------------ state --
+const G = {
+  run: null, arena: null, roomRng: null, mods: {}, roomActive: false, roomCleared: false,
+  hp: 100, shield: 0, invuln: 0, dmgFlash: 0, timeScale: 1, hitstop: 0, kickX: 0, kickY: 0,
+  bossMode: false, boss: null, extractHold: 0, roomTimer: 0, killsThisRoom: 0,
+  lastFrame: performance.now(), best: Number(localStorage.getItem("hs_best") || 0),
+  fpsAcc: 0, fpsN: 0, seedText: "",
+};
+
+function toast(text, warn = false, ms = 1400) {
+  const t = $("#toast"); t.textContent = text; t.className = "on" + (warn ? " warn" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => (t.className = ""), ms);
+}
+
+// -------------------------------------------------------------- run flow --
+function beginRun(seed, cursesEnabled) {
+  initAudio(); resumeAudio();
+  G.run = newRun(seed, { cursesEnabled });
+  G.seedText = formatSeed(seed);
+  G.hp = G.run.maxHp; G.shield = 0;
+  onFloorStart(true);
+}
+
+function onFloorStart(first = false) {
+  const r = G.run;
+  if (r.phase !== "floor_start") return;
+  if (first || !canExtract(r)) { enterFloor(); return; }
+  // offer extract vs deeper
+  $("#fsTitle").textContent = `FLOOR ${r.floor}`;
+  const s = scoreRun(r).total;
+  $("#fsText").textContent = `Banking now scores ${s.toLocaleString()}. Going deeper multiplies everything — and everything hits harder.`;
+  input.releaseLock();
+  show("#floorStart");
+}
+
+function enterFloor() {
+  G.run = startFloor(G.run);
+  SFX.door();
+  enterRoom();
+}
+
+function enterRoom() {
+  const r = G.run;
+  const room = r.currentFloor.rooms[r.roomIndex];
+  const seedRng = makeRng(r.seed).fork(`room${r.floor}-${r.roomIndex}`);
+  G.roomRng = seedRng;
+  G.mods = { swarm: room.modifier === "swarm", noDash: room.modifier === "no_dash", lowGravity: room.modifier === "low_gravity", darkness: room.modifier === "darkness", timePressure: room.modifier === "time_pressure" };
+  G.arena?.dispose();
+  G.arena = buildArena(scene, seedRng.fork("arena"), { blockCount: undefined });
+  player.arena = G.arena;
+  player.reset(0, G.arena.halfD - 4);
+  player.yaw = 0; player.pitch = 0;
+  applyStats();
+  enemies.clear();
+  enemies.spawnRoom(seedRng.fork("enemies"), r.floor, r.roomIndex, G.arena, G.mods, room.eliteCount);
+  G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
+  G.roomTimer = G.mods.timePressure ? 60 : 0;
+  G.shield = r.stats.roomShield ?? 0;
+  scene.fog.density = G.mods.darkness ? 0.11 : 0.028;
+  $("#floorNum").textContent = `FLOOR ${r.floor}`;
+  $("#roomNum").textContent = `ROOM ${r.roomIndex + 1}/5`;
+  $("#modName").textContent = room.modifier ? ROOM_MODIFIERS[room.modifier].name.toUpperCase() : (room.hazardTag ? room.hazardTag.replace("_", " ").toUpperCase() : "");
+  if (room.modifier) toast(ROOM_MODIFIERS[room.modifier].name + " — " + ROOM_MODIFIERS[room.modifier].desc, true, 2200);
+  weaponView.equip(r.weapon);
+  renderItems();
+  show("#hud");
+  input.requestLock();
+}
+
+function enterBoss() {
+  const r = G.run;
+  const b = r.currentFloor.boss;
+  const seedRng = makeRng(r.seed).fork(`boss${r.floor}`);
+  G.arena?.dispose();
+  G.arena = buildArena(scene, seedRng.fork("arena"), { blockCount: 4, halfW: 18, halfD: 18 });
+  player.arena = G.arena; player.reset(0, 14); player.yaw = 0; player.pitch = 0;
+  enemies.clear();
+  // boss = a big elite of a fitting archetype with the floor's affix, hp from floor data
+  const arch = { custodian: "warden", chorus: "sentinel", landlord: "brute" }[b.id] ?? "brute";
+  const data = scaleEnemy(arch, r.floor, 4, b.affix);
+  data.hp = b.hp; data.maxHp = b.hp; data.damage *= 1.6; data.name = b.name;
+  const boss = enemies.spawn(data, 0, -8, true);
+  boss.mesh.scale.multiplyScalar(1.7); boss.radius *= 1.7; boss.isBoss = true;
+  if (b.id === "chorus") { for (const dx of [-5, 5]) { const m = scaleEnemy("sentinel", r.floor, 4, null); m.hp = Math.round(b.hp * 0.35); m.maxHp = m.hp; const e = enemies.spawn(m, dx, -9, true); e.mesh.scale.multiplyScalar(1.2); e.radius *= 1.2; e.isBossAdd = true; } }
+  G.boss = boss; G.bossMode = true; G.roomActive = true; G.roomCleared = false; G.roomTimer = 0;
+  $("#roomNum").textContent = "BOSS"; $("#modName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`;
+  toast(`${b.name} — ${b.affix}`, true, 2600); SFX.bossRoar();
+  weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
+}
+
+function applyStats() {
+  const s = G.run.stats;
+  player.setStats({ moveSpeed: s.moveSpeed, jumps: s.jumps ?? 1, dashCooldown: G.mods.noDash ? 9999 : (s.dashCooldown ?? 3), gravity: (s.gravity ?? 1) * (G.mods.lowGravity ? 0.45 : 1), airControl: s.airControl ? 1 : 0.35, dashPhases: !!s.dashPhases, slide: !!s.slide });
+}
+
+function onRoomCleared() {
+  G.roomCleared = true; G.roomActive = false;
+  SFX.roomClear();
+  toast("ROOM CLEAR — reach the exit");
+  G.arena.exit.material.opacity = 0.75;
+}
+
+function openDraft() {
+  G.run = clearRoom(G.run, { kills: G.killsThisRoom });
+  const r = G.run;
+  input.releaseLock();
+  const wrap = $("#draftCards"); wrap.innerHTML = "";
+  r.draft.forEach((it, i) => {
+    const c = document.createElement("div");
+    c.className = `card ${it.rarity}`;
+    c.innerHTML = `<div class="rar">${it.rarity}</div><h3>${it.name}</h3><p>${it.desc || describe(it)}</p>${it.stacks ? '<div class="stack">STACKS</div>' : ""}${it.requires ? `<div class="stack">REQUIRES ${ITEM_BY_ID[it.requires]?.name ?? it.requires}</div>` : ""}`;
+    c.addEventListener("click", () => { SFX.pickup(); afterReward(i); });
+    wrap.appendChild(c);
+  });
+  $("#btnSkip").onclick = () => afterReward(null);
+  show("#draft");
+}
+
+function describe(it) {
+  return Object.entries(it.effects).map(([k, v]) => v === true ? k : v.mul != null ? `${k} ×${v.mul}` : `${k} +${v.add}`).join(" · ");
+}
+
+function afterReward(index) {
+  const before = G.run.maxHp;
+  G.run = takeReward(G.run, index);
+  G.hp = Math.min(G.run.maxHp, G.hp + Math.max(0, G.run.maxHp - before));
+  applyStats(); renderItems();
+  if (G.run.phase === "door") openDoors();
+  else if (G.run.phase === "boss") enterBoss();
+}
+
+function openDoors() {
+  const r = G.run;
+  const doors = r.currentFloor.rooms[r.roomIndex].doors;
+  const wrap = $("#doorCards"); wrap.innerHTML = "";
+  doors.forEach((d, i) => {
+    const c = document.createElement("div"); c.className = "card";
+    const p = d.preview;
+    c.innerHTML = `<h3>DOOR ${i + 1}</h3><div><span class="tag">${p.rewardType.toUpperCase()}</span>${p.hazardTag ? `<span class="tag">${p.hazardTag.replace("_", " ").toUpperCase()}</span>` : ""}${p.hasElite ? '<span class="tag elite">ELITE</span>' : ""}</div>`;
+    c.addEventListener("click", () => { SFX.door(); G.run = chooseDoor(G.run, i); enterRoom(); });
+    wrap.appendChild(c);
+  });
+  show("#doors");
+}
+
+function onBossDown() {
+  G.run = beatBoss(G.run);
+  SFX.extract();
+  onFloorStart(false);
+}
+
+function endRun(kind) {
+  const r = G.run;
+  input.releaseLock();
+  const sc = r.finalScore;
+  if (sc > G.best) { G.best = sc; localStorage.setItem("hs_best", String(sc)); }
+  $("#repSub").textContent = kind === "extracted" ? "extracted · banked" : "run over";
+  $("#repTitle").textContent = kind === "extracted" ? "EXTRACTED" : "DEAD";
+  $("#repScore").textContent = sc.toLocaleString();
+  const br = scoreRun(r).breakdown;
+  $("#repStats").innerHTML = `<span>floor reached</span><b>${r.depthReached}</b><span>kills</span><b>${r.kills}</b><span>rooms</span><b>${r.roomsCleared}</b><span>items</span><b>${r.held.length}</b><span>depth mult</span><b>×${br.depthMult}</b><span>best</span><b>${G.best.toLocaleString()}</b>`;
+  $("#repBonus").textContent = br.bonuses.length ? "STYLE: " + br.bonuses.map(b => `${b.name} +${b.points}`).join(" · ") : "";
+  $("#repSeed").textContent = `SEED ${G.seedText}`;
+  show("#report");
+  if (kind === "dead") SFX.death();
+}
+
+function renderItems() {
+  const wrap = $("#items"); wrap.innerHTML = "";
+  const counts = {};
+  for (const id of G.run.held) counts[id] = (counts[id] ?? 0) + 1;
+  for (const [id, n] of Object.entries(counts)) {
+    const it = ITEM_BY_ID[id]; if (!it) continue;
+    const s = document.createElement("span"); s.className = it.rarity; s.textContent = n > 1 ? `${it.name} ×${n}` : it.name; wrap.appendChild(s);
+  }
+  $("#weaponName").textContent = `${G.run.weapon.archetype.toUpperCase()} · ${G.run.weapon.rarity.toUpperCase()}`;
+}
+
+// ---------------------------------------------------------------- damage --
+function damagePlayer(amount, why = "?") {
+  if (G.invuln > 0 || !G.roomActive) return;
+  if (window.__dbg) (window.__dmgLog ??= []).push({ t: Math.round(performance.now()), amount: Math.round(amount * 10) / 10, why, hp: Math.round(G.hp) });
+  const s = G.run.stats;
+  if (s.deflect > 0 && G.roomRng.next() < s.deflect) { toast("DEFLECT"); return; }
+  const still = Math.hypot(player.vel.x, player.vel.z) < 0.5;
+  if (still && s.stillDamageTaken) amount *= s.stillDamageTaken;
+  if (G.shield > 0) { const a = Math.min(G.shield, amount); G.shield -= a; amount -= a; }
+  G.hp -= amount; G.invuln = 0.35; G.dmgFlash = 1; G.kickX += (Math.random() - 0.5) * 0.06; G.kickY += 0.04;
+  SFX.hurt();
+  if (s.bulletTime && G.hp > 0 && G.hp / G.run.maxHp < 0.3 && (G.btCd ?? 0) <= 0) { G.timeScale = 0.6; G.btT = 1; G.btCd = 20; }
+  if (G.hp <= 0) {
+    G.hp = 0;
+    const next = die(G.run);
+    if (next.phase === "dead") { G.run = next; endRun("dead"); return; }
+    G.run = next;
+    if (next.hp === 1 && next.phase === "room") { G.hp = 1; toast("SECOND WIND", true, 1800); G.invuln = 1.5; return; }
+    // The Loop: floor restarts
+    G.hp = next.maxHp; toast("THE LOOP — again", true, 2200); enterFloor();
+  }
+}
+
+function heal(n) { if (n <= 0 || G.run.stats.noHeal) return; G.hp = Math.min(G.run.maxHp, G.hp + n); }
+
+// -------------------------------------------------------------- shooting --
+const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _end = new THREE.Vector3();
+function fire(want, dt) {
+  const r = G.run, s = { ...r.stats, ...r.weapon.stats };
+  const dir = player.forwardDir(_d);
+  // touch aim assist (soft magnetism)
+  if (input.isTouch && enemies.aliveCount) {
+    const targets = enemies.list.filter(e => e.alive).map(e => ({ x: e.mesh.position.x - player.pos.x, y: e.mesh.position.y - player.pos.y, z: e.mesh.position.z - player.pos.z }));
+    const a = aimAssist({ x: dir.x, y: dir.y, z: dir.z }, targets, 0.35, { coneDeg: 9 });
+    dir.set(a.x, a.y, a.z);
+  }
+  const shot = weaponView.tryFire(want, dt, s, G.roomRng, dir);
+  if (!shot) return;
+  const origin = _o.copy(player.pos);
+  const pierce = (s.pierce ?? 0) + (r.weapon.stats.pierce ?? 0);
+  let anyHit = false;
+  for (const ray of shot.rays) {
+    const hits = enemies.raycast(origin, ray.dir, 120, pierce >= 99 ? 50 : pierce);
+    _end.copy(origin).addScaledVector(ray.dir, hits.length ? hits[hits.length - 1].t : 60);
+    if (!shot.beam || G.roomRng.next() < 0.5) weaponView.spawnTracer(origin.clone().add(new THREE.Vector3(0.2, -0.15, 0)), _end.clone(), shot.beam ? COLORS.accent2 : 0xffd080, shot.beam ? 0.05 : 0.025, shot.beam ? 0.05 : 0.08);
+    for (const h of hits) {
+      if (h.blocked) { toast("BLOCKED", true, 500); continue; }
+      const stats = { ...s, damage: s.damage * (r.weapon.stats.damage ?? 1) / (r.weapon.stats.damage ? 1 : 1) };
+      // player stats.damage is a multiplier on the weapon's damage
+      const combined = { ...s, damage: (r.weapon.stats.damage ?? 10) * (r.stats.damage ?? 1) * (shot.dmgMult ?? 1) };
+      const target = { hp: h.e.hp, maxHp: h.e.maxHp, armor: h.e.armor ?? 0, statuses: h.e.statuses };
+      const res = resolveHit({ isHeadshot: false, isFirstShot: shot.isFirst, isLastShot: shot.isLast }, target, combined, G.roomRng);
+      h.e.statuses = res.statusesAfter;
+      const killed = enemies.damage(h.e, res.damage, res.hpAfter, res.killed);
+      anyHit = true;
+      if (res.crit) { SFX.crit(); G.hitstop = Math.max(G.hitstop, 0.045); } else SFX.hit();
+      heal(res.heal);
+      if (killed) onKill(h.e, res);
+    }
+  }
+  if (anyHit) { $("#crosshair").classList.add("hit"); setTimeout(() => $("#crosshair").classList.remove("hit"), 70); }
+}
+
+function onKill(e, res) {
+  const s = G.run.stats;
+  G.killsThisRoom++;
+  heal(s.healOnKill ?? 0);
+  if (s.dashOnKill) player.dashCd = 0;
+  if (s.onKillExplode > 0) explode(e.mesh.position, 2.5, res.damage * s.onKillExplode);
+  if (e.isBoss) {
+    // chorus adds die with the boss
+    for (const o of enemies.list) if (o.isBossAdd) enemies._kill(o, null, true);
+    G.roomActive = false; G.roomCleared = true; toast("BOSS DOWN", false, 1800); G.arena.exit.material.opacity = 0.75;
+    return;
+  }
+  if (!G.bossMode && enemies.aliveCount === 0) onRoomCleared();
+}
+
+function explode(pos, radius, dmg) {
+  for (const e of enemies.list) {
+    if (!e.alive) continue;
+    const d = e.mesh.position.distanceTo(pos);
+    if (d < radius) { const hp = Math.max(0, e.hp - dmg); const killed = enemies.damage(e, dmg, hp, hp <= 0); if (killed) onKill(e, { damage: dmg }); }
+  }
+}
+
+// ------------------------------------------------------------------ loop --
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = Math.min(0.05, (now - G.lastFrame) / 1000); G.lastFrame = now;
+  if (G.hitstop > 0) { G.hitstop -= dt; dt *= 0.15; }
+  if (G.btT > 0) { G.btT -= dt; if (G.btT <= 0) G.timeScale = 1; }
+  G.btCd = Math.max(0, (G.btCd ?? 0) - dt);
+  dt *= G.timeScale;
+
+  const { s, look } = input.poll();
+  if (G.run && $("#hud") && !$("#hud").classList.contains("hidden")) {
+    const sens = input.isTouch ? input.mouseSens : input.mouseSens;
+    if (input.locked || input.isTouch) player.look(look.dx, look.dy, sens);
+    player.update(dt, s);
+    if (player.dashed) SFX.dash(); if (player.jumped) SFX.jump();
+    if (s.reload) weaponView.startReload(G.run.stats);
+    weaponView.update(dt, Math.hypot(player.vel.x, player.vel.z) > 1);
+    // camera kick
+    camera.rotation.x += G.kickY; camera.rotation.z += G.kickX;
+    G.kickX *= 0.85; G.kickY *= 0.85;
+
+    if (G.roomActive || G.bossMode) {
+      const s2 = { ...G.run.stats, ...G.run.weapon.stats };
+      fire(s.fire, dt);
+      const events = enemies.update(dt, player, G.arena, s2);
+      for (const ev of events) {
+        if (ev.type === "hitPlayer") { damagePlayer(ev.dmg, ev.projectile ? "projectile" : ("melee:" + (ev.src?.archetype ?? "?"))); if (ev.src && G.run.stats.thorns) { const hp = Math.max(0, ev.src.hp - G.run.stats.thorns); enemies.damage(ev.src, G.run.stats.thorns, hp, hp <= 0) && onKill(ev.src, { damage: 0 }); } }
+        else if (ev.type === "popperBoom") { const d = player.pos.distanceTo(ev.pos); if (d < ev.r) damagePlayer(ev.dmg * (1 - d / ev.r), "popper"); explode(ev.pos, ev.r, ev.dmg * 0.5); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
+        else if (ev.type === "kill") { if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
+      }
+      if (G.mods.timePressure && G.roomActive) { G.roomTimer -= dt; if (G.roomTimer <= 0) { damagePlayer(9999, "timer"); } }
+      // regen out of combat-ish
+      if (G.run.stats.regen > 0 && G.invuln <= 0) heal(G.run.stats.regen * dt);
+      if (G.shield > 0) G.shield = Math.max(0, G.shield - dt * 2);
+    }
+    G.invuln = Math.max(0, G.invuln - dt);
+    G.dmgFlash = Math.max(0, G.dmgFlash - dt * 3);
+
+    // exit pad
+    if (G.roomCleared && G.arena) {
+      const d = Math.hypot(player.pos.x - G.arena.exitPos.x, player.pos.z - G.arena.exitPos.z);
+      G.arena.exit.userData.ring.rotation.z += dt * 2;
+      if (d < 1.8) { G.roomCleared = false; if (G.bossMode) onBossDown(); else openDraft(); }
+    }
+    // hud
+    $("#hpFill").style.width = `${Math.max(0, G.hp / G.run.maxHp) * 100}%`;
+    $("#shFill").style.width = `${Math.min(100, (G.shield / Math.max(1, G.run.maxHp)) * 100)}%`;
+    $("#hpText").textContent = Math.ceil(G.hp);
+    $("#ammoText").textContent = weaponView.ammoText;
+    $("#ammo").classList.toggle("reloading", weaponView.reloading);
+    $("#dashFill").style.width = `${(1 - Math.min(1, player.dashCd / Math.max(0.01, player.stats.dashCooldown))) * 100}%`;
+    $("#dmgflash").classList.toggle("on", G.dmgFlash > 0.05 || (G.hp / G.run.maxHp) < 0.25 && Math.sin(now / 120) > 0);
+    if (G.mods.timePressure && G.roomActive) $("#modName").textContent = `COUNTDOWN ${Math.ceil(G.roomTimer)}`;
+    // fps counter (dev)
+    G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${tierName.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
+  }
+  renderer.render(scene, camera);
+}
+
+// -------------------------------------------------------------- menu wiring --
+function menu() {
+  input.releaseLock();
+  $("#bestLine").textContent = G.best ? `BEST ${G.best.toLocaleString()}` : "";
+  $("#menuHint").textContent = input.isTouch ? "left thumb: move · right thumb: look · buttons: fire / dash / jump / reload" : "WASD · mouse · shift dash · space jump · R reload · click to lock";
+  show("#menu");
+}
+$("#btnRun").addEventListener("click", () => {
+  const txt = $("#seedInput").value.trim();
+  const seed = txt ? (parseSeed(txt) ?? (Math.random() * 2 ** 32) >>> 0) : (Math.random() * 2 ** 32) >>> 0;
+  beginRun(seed, $("#chkCurses").checked);
+});
+$("#btnDaily").addEventListener("click", () => beginRun(dailySeed(), $("#chkCurses").checked));
+$("#btnDeeper").addEventListener("click", () => { SFX.ui(); enterFloor(); });
+$("#btnExtract").addEventListener("click", () => { G.run = extract(G.run); SFX.extract(); endRun("extracted"); });
+$("#btnAgain").addEventListener("click", () => beginRun((Math.random() * 2 ** 32) >>> 0, G.run.cursesEnabled));
+$("#btnMenu").addEventListener("click", menu);
+document.addEventListener("keydown", (e) => { if (e.code === "Escape" && G.run && !$("#hud").classList.contains("hidden")) input.releaseLock(); });
+document.addEventListener("click", () => resumeAudio(), { once: true });
+document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, { once: true });
+
+// go
+$("#boot").classList.add("hidden");
+menu();
+requestAnimationFrame(frame);

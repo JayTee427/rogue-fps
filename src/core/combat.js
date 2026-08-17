@@ -1,4 +1,3 @@
-import { RNG } from "core/rng.js";
 
 export function resolveHit(shot, target, stats, rng) {
   const hp = target.hp;
