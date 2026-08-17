@@ -10,13 +10,16 @@ import { scoreRun } from "core/score.js";
 import { dailySeed, formatSeed, parseSeed } from "core/daily.js";
 import { pickQualityTier } from "core/quality.js";
 import { aimAssist } from "core/assist.js";
-import { ITEM_BY_ID } from "core/items.js";
+import { ITEM_BY_ID, ITEMS } from "core/items.js";
 import { flavourFor } from "core/codex.js";
 import { scaleEnemy } from "core/enemies.js";
 import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
 import { planEncounter, updateSkill } from "core/director.js";
 import { rollChallenge, checkChallenge } from "core/challenges.js";
 import { layoutDressing, PROP_KINDS } from "core/dressing.js";
+import { rollStock, buy, rerollStock, REROLL_COST } from "core/shop.js";
+import { BOONS, rollPact, acceptPact, refusePact } from "core/pact.js";
+import { computeStats, BASE_STATS } from "core/stats.js";
 
 import { createRenderer, buildArena, buildDressing, COLORS } from "./renderer.js";
 import { Player } from "./player.js";
@@ -226,6 +229,7 @@ function enterRoom() {
   if (room.modifier) toast(ROOM_MODIFIERS[room.modifier].name + " — " + ROOM_MODIFIERS[room.modifier].desc, true, 2200);
   weaponView.equip(r.weapon);
   renderItems();
+  addGold(0);                    // refresh the readout
   show("#hud");
   input.requestLock();
 }
@@ -256,6 +260,30 @@ function enterBoss() {
   weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
 }
 
+function addGold(n) {
+  G.run = { ...G.run, gold: Math.max(0, Math.round((G.run.gold ?? 0) + n)) };
+  const el = $("#goldNum");
+  if (el) el.textContent = String(G.run.gold);
+}
+
+/** Recompute stats from everything the player is carrying, and carry the maxHp
+ *  change through to run.maxHp and current health — exactly what core/run.js's
+ *  takeReward does. Every path that adds to `held` or `boons` outside takeReward
+ *  MUST call this: the shop, the bonus item, and the curse altar all bypass it,
+ *  and without this a purchased item is inert and a +HP boon is discarded.
+ *  Boons are not items, so run.js cannot see them; they are appended here. */
+function recomputeStats() {
+  const items = (G.run.held ?? []).map((id) => ITEM_BY_ID[id]).filter(Boolean);
+  const boonObjs = (G.run.boons ?? []).map((id) => BOONS[id]).filter(Boolean).map((b) => ({ effects: b.effects }));
+  const stats = computeStats(BASE_STATS, [...items, ...boonObjs]);
+  const oldMax = G.run.maxHp ?? stats.maxHp;
+  const newMax = stats.maxHp;
+  G.run = { ...G.run, stats, maxHp: newMax };
+  if (newMax !== oldMax) G.hp = Math.min(newMax, G.hp + (newMax - oldMax));  // a +HP pickup heals you by that much
+  applyStats();
+  renderItems();
+}
+
 function applyStats() {
   const s = G.run.stats;
   player.setStats({ moveSpeed: s.moveSpeed, jumps: s.jumps ?? 1, dashCooldown: G.mods.noDash ? 9999 : (s.dashCooldown ?? 1.4), gravity: (s.gravity ?? 1) * (G.mods.lowGravity ? 0.45 : 1), airControl: s.airControl ? 1 : 0.35, dashPhases: !!s.dashPhases, slide: !!s.slide });
@@ -268,6 +296,7 @@ function onRoomCleared() {
   const st = G.roomStats ?? {};
   G.skill = updateSkill(G.skill, { clearedSecs: st.secs ?? 0, damageTaken: st.damageTaken ?? 0, accuracy: st.shotsFired ? st.shotsHit / st.shotsFired : 0.5 });
   localStorage.setItem("hs_skill", String(G.skill));
+  addGold(15 + G.run.floor * 5);
   const won = roomChallengeEnd();
   if (won) {
     // Pay it out. Awarding a challenge and then giving nothing is worse than
@@ -289,6 +318,9 @@ function openDraft() {
   G.run = clearRoom(G.run, { kills: G.killsThisRoom });
   input.releaseLock();
   if (rewardType === "weapon") return openWeaponOffer();
+  if (rewardType === "shop") return openShop();
+  if (rewardType === "curse") return openPact();
+  if (rewardType === "heal") return openHeal();
   const r = G.run;
   const wrap = $("#draftCards"); wrap.innerHTML = "";
   r.draft.forEach((it, i) => {
@@ -299,6 +331,28 @@ function openDraft() {
     c.addEventListener("click", () => { SFX.pickup(); afterReward(i); });
     wrap.appendChild(c);
   });
+  // The "item" challenge reward promised extra cards. Deliver them here rather
+  // than leaving G.pendingBonusItem set and never read.
+  if (G.pendingBonusItem) {
+    const extra = makeRng(r.seed).fork(`bonus${r.floor}-${r.roomIndex}`);
+    const pool = ITEMS.filter((it) => it.rarity !== "cursed" && !r.held.includes(it.id));
+    for (let n = 0; n < G.pendingBonusItem && pool.length; n++) {
+      const it = pool.splice(extra.int(0, pool.length - 1), 1)[0];
+      const c = document.createElement("div");
+      c.className = `card ${it.rarity}`;
+      const bf = flavourFor(it.id);
+      c.innerHTML = `<div class="rar">bonus \u00b7 ${it.rarity}</div><h3>${it.name}</h3>`
+        + `<p>${it.desc || describe(it)}</p>${bf ? `<div class="flav">${bf}</div>` : ""}`;
+      c.addEventListener("click", () => {
+        SFX.pickup();
+        G.run = { ...G.run, held: [...G.run.held, it.id] };
+        recomputeStats();
+        afterReward(null);
+      });
+      wrap.appendChild(c);
+    }
+    G.pendingBonusItem = 0;
+  }
   $("#btnSkip").onclick = () => afterReward(null);
   show("#draft");
 }
@@ -361,6 +415,105 @@ function resolveWeapon(take) {
   G.offeredWeapon = null;
   renderItems();
   G.run = takeReward(G.run, null);        // resolve the reward phase, taking no item
+  if (G.run.phase === "door") openDoors(); else if (G.run.phase === "boss") enterBoss();
+}
+
+// ---------------------------------------------------------------- shop --
+function shopCard(offer, i) {
+  const el = document.createElement("div");
+  const it = offer.kind === "item" ? ITEM_BY_ID[offer.id] : null;
+  el.className = `card ${it ? it.rarity : "common"}${offer.sold ? " sold" : ""}`;
+  const title = it ? it.name : offer.kind === "heal" ? "Repair Kit" : offer.kind === "reroll" ? "Reroll Token" : "Weapon Cache";
+  const body = it ? (it.desc || describe(it))
+    : offer.kind === "heal" ? "Patch the hull. Restores health."
+    : offer.kind === "reroll" ? "Refresh a future draft."
+    : "A weapon of unknown make.";
+  const flav = it ? flavourFor(it.id) : "";
+  el.innerHTML = `<div class="rar">${it ? it.rarity : offer.kind}</div><h3>${title}</h3><p>${body}</p>`
+    + `${flav ? `<div class="flav">${flav}</div>` : ""}`
+    + `<div class="price">${offer.sold ? "SOLD" : offer.price + " \u00a4"}</div>`;
+  if (!offer.sold) el.addEventListener("click", () => tryBuy(i));
+  return el;
+}
+
+function renderShop() {
+  const wrap = $("#shopCards"); wrap.innerHTML = "";
+  G.shopStock.forEach((o, i) => wrap.appendChild(shopCard(o, i)));
+  $("#shopGold").textContent = String(G.run.gold ?? 0);
+  $("#btnShopReroll").textContent = `Reroll (${REROLL_COST} \u00a4)`;
+}
+
+function openShop() {
+  const r = G.run;
+  G.shopStock = rollStock(makeRng(r.seed).fork(`shop${r.floor}-${r.roomIndex}`),
+    { floor: r.floor, gold: r.gold ?? 0, held: r.held });
+  renderShop();
+  show("#shop");
+}
+
+function tryBuy(i) {
+  const res = buy({ gold: G.run.gold ?? 0, stock: G.shopStock, held: G.run.held }, i);
+  if (!res.ok) { SFX.empty(); toast(res.error ?? "cannot afford that", true, 1200); return; }
+  G.shopStock = res.stock;
+  G.run = { ...G.run, gold: res.gold };
+  const b = res.bought;
+  if (b.kind === "item") { G.run = { ...G.run, held: [...G.run.held, b.id] }; recomputeStats(); }
+  else if (b.kind === "heal") G.hp = Math.min(G.run.maxHp, G.hp + 35);
+  else if (b.kind === "reroll") G.run = { ...G.run, rerolls: (G.run.rerolls ?? 0) + 1 };
+  else if (b.kind === "weapon") {
+    G.run = swapWeapon(G.run, rollWeapon(makeRng(G.run.seed).fork(`shopgun${G.run.roomIndex}`), "carbine", G.run.floor));
+    weaponView.equip(G.run.weapon);
+  }
+  SFX.pickup();
+  renderShop();
+}
+
+function leaveShop() {
+  SFX.ui();
+  G.run = takeReward(G.run, null);
+  if (G.run.phase === "door") openDoors(); else if (G.run.phase === "boss") enterBoss();
+}
+
+// ---------------------------------------------------------- curse altar --
+function openPact() {
+  const r = G.run;
+  const p = rollPact(makeRng(r.seed).fork(`pact${r.floor}-${r.roomIndex}`),
+    { floor: r.floor, held: r.held, maxHp: r.maxHp });
+  if (!p) return openHeal();            // every curse already taken: give something, not nothing
+  G.pact = p;
+  const curse = ITEM_BY_ID[p.curse], boon = BOONS[p.boon];
+  const cf = flavourFor(curse.id);
+  $("#pactText").textContent = p.text;
+  $("#pactCurse").innerHTML = `<div class="rar">you take</div><h3>${curse.name}</h3>`
+    + `<p>${curse.desc || describe(curse)}</p>${cf ? `<div class="flav">${cf}</div>` : ""}`;
+  $("#pactBoon").innerHTML = `<div class="rar">you gain</div><h3>${boon.name}</h3><p>${boon.desc}</p>`;
+  show("#pact");
+}
+
+function resolvePact(accept) {
+  const p = G.pact;
+  if (accept && p) {
+    const res = acceptPact({ ...G.run }, p);
+    G.run = { ...G.run, held: res.held, boons: [...(G.run.boons ?? []), p.boon] };
+    recomputeStats();
+    toast(`${BOONS[p.boon].name} - and what it cost you`, true, 2600);
+    SFX.pickup();
+  } else {
+    SFX.ui();
+    G.run = refusePact(G.run);
+  }
+  G.pact = null;
+  G.run = takeReward(G.run, null);
+  if (G.run.phase === "door") openDoors(); else if (G.run.phase === "boss") enterBoss();
+}
+
+// ----------------------------------------------------------- heal room --
+function openHeal() {
+  const before = G.hp;
+  G.hp = Math.min(G.run.maxHp, G.hp + Math.round(G.run.maxHp * 0.35));
+  toast(`REPAIR BAY - +${Math.round(G.hp - before)} HP`, false, 2200);
+  SFX.pickup();
+  G.run = takeReward(G.run, null);
   if (G.run.phase === "door") openDoors(); else if (G.run.phase === "boss") enterBoss();
 }
 
@@ -514,6 +667,7 @@ function onKill(e, res) {
   const s = G.run.stats;
   G.killsThisRoom++;
   if (G.roomStats) G.roomStats.kills++;
+  addGold(2 + G.run.floor);
   fx.kill(e.mesh.position); fx.trauma(0.28); duckMusic(0.3, 0.2); G.hitstop = Math.max(G.hitstop, 0.05);
   heal(s.healOnKill ?? 0);
   if (s.dashOnKill) player.dashCd = 0;
@@ -702,6 +856,15 @@ $("#btnRun").addEventListener("click", () => {
   const seed = txt ? (parseSeed(txt) ?? (Math.random() * 2 ** 32) >>> 0) : (Math.random() * 2 ** 32) >>> 0;
   beginRun(seed, $("#chkCurses").checked);
 });
+$("#btnShopLeave").addEventListener("click", leaveShop);
+$("#btnShopReroll").addEventListener("click", () => {
+  const res = rerollStock(makeRng(G.run.seed).fork(`shopre${G.run.gold}`),
+    { gold: G.run.gold ?? 0, stock: G.shopStock, run: { floor: G.run.floor, gold: G.run.gold ?? 0, held: G.run.held } });
+  if (!res.ok) { SFX.empty(); toast("not enough salvage", true, 1200); return; }
+  G.shopStock = res.stock; G.run = { ...G.run, gold: res.gold }; SFX.ui(); renderShop();
+});
+$("#btnPactAccept").addEventListener("click", () => resolvePact(true));
+$("#btnPactRefuse").addEventListener("click", () => resolvePact(false));
 $("#btnSwap").addEventListener("click", () => resolveWeapon(true));
 $("#btnKeep").addEventListener("click", () => resolveWeapon(false));
 $("#btnDaily").addEventListener("click", () => beginRun(dailySeed(), $("#chkCurses").checked));
@@ -728,6 +891,7 @@ if (new URLSearchParams(location.search).has("dev")) {
     clearRoom() { for (const e of enemies.list) if (e.alive) enemies._kill(e, null, true); if (G.bossMode) { G.roomActive = false; G.roomCleared = true; G.arena.exit.material.opacity = 0.75; } else onRoomCleared(); },
     toExit() { player.pos.x = G.arena.exitPos.x; player.pos.z = G.arena.exitPos.z; },
     toBoss() { G.run = { ...G.run, phase: "boss" }; enterBoss(); },
+    recompute() { recomputeStats(); return { maxHp: G.run.maxHp, statMax: G.run.stats.maxHp, hp: G.hp, boons: G.run.boons }; },
     god() { G.invuln = 1e9; },
   };
 }

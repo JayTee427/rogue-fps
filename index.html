@@ -93,10 +93,13 @@
     /* draft — wraps on desktop; on a phone it becomes a horizontal snap-scroller
        so all three cards stay reachable with one thumb and never overflow the
        viewport vertically */
-    #draft .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+    #draft .cards, #shop .cards, #pact .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+    /* A shop can stock six offers where a draft shows three; let it scroll
+       rather than run off the bottom of a short window. */
+    #shop .cards { max-height: 62vh; overflow-y: auto; align-content: flex-start; padding: 2px; }
     @media (max-width: 640px) {
-      #draft .cards, #doors .cards { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 12px 14px; width: 100vw; -webkit-overflow-scrolling: touch; }
-      #draft .cards .card, #doors .cards .card { flex: 0 0 min(240px, 76vw); scroll-snap-align: center; }
+      #draft .cards, #doors .cards, #shop .cards, #pact .cards { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 12px 14px; width: 100vw; -webkit-overflow-scrolling: touch; }
+      #draft .cards .card, #doors .cards .card, #shop .cards .card, #pact .cards .card { flex: 0 0 min(240px, 76vw); scroll-snap-align: center; }
       .screen { justify-content: flex-start; padding-top: calc(28px + var(--safe-t)); overflow-y: auto; }
     }
     .card { width: min(240px, 80vw); border: 2px solid #2a3140; border-radius: 10px; padding: 16px; background: #0f1218; text-align: left; cursor: pointer; transition: transform 80ms, border-color 80ms; }
@@ -110,6 +113,7 @@
     .card.rare { border-color: var(--rare); } .card.rare .rar { color: var(--rare); }
     .card.legendary { border-color: var(--legend); box-shadow: 0 0 24px rgba(255,179,71,.25); } .card.legendary .rar { color: var(--legend); }
     .card.cursed { border-color: var(--cursed); } .card.cursed .rar { color: var(--cursed); }
+    .card.cursed { background: rgba(140,20,60,.12); }
     .card .stack { font-size: 10px; color: var(--accent2); letter-spacing: .1em; }
     /* weapon offer: a compare card, held vs offered */
     .wcard { width: min(300px, 88vw); }
@@ -122,6 +126,10 @@
     .wstats .d { text-align: right; font-weight: 700; }
     .wstats .d.up { color: #6cff9a; } .wstats .d.down { color: #ff6b6b; } .wstats .d.same { color: var(--dim); }
     #weaponOffer .held { opacity: .55; }
+    .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
+    .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
+    #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
+    #goldLine { position: absolute; right: calc(14px + var(--safe-r)); bottom: calc(64px + var(--safe-b, 0px)); font-size: 13px; color: var(--gold); opacity: .75; letter-spacing: .12em; text-shadow: 0 0 8px rgba(0,0,0,.8); }
 
     /* doors */
     #doors .cards .card { text-align: center; }
@@ -163,6 +171,7 @@
     <div id="dashcd"><i id="dashFill"></i></div>
     <div id="bossbar" class="hidden"><div id="bossName">THE CUSTODIAN</div><div class="track"><div id="bossFill"></div></div></div>
     <div id="ammo"><span id="ammoText">12</span><small id="weaponName">SIDEARM</small></div>
+    <div id="goldLine"><span id="goldNum">0</span> &#164;</div>
     <div id="toast"></div>
     <div id="touch">
       <div id="joy"><i></i></div>
@@ -205,6 +214,24 @@
     <div class="sub">weapons cache · swap or keep</div>
     <div class="cards" id="weaponCards"></div>
     <div class="row"><button class="big" id="btnSwap">Take It</button><button class="big ghost" id="btnKeep">Keep Mine</button></div>
+  </div>
+
+  <!-- shop -->
+  <div id="shop" class="layer screen hidden">
+    <div class="sub">salvage exchange · <span id="shopGold">0</span> &#164;</div>
+    <div class="cards" id="shopCards"></div>
+    <div class="row"><button class="big ghost" id="btnShopReroll">Reroll</button><button class="big" id="btnShopLeave">Leave</button></div>
+  </div>
+
+  <!-- curse altar -->
+  <div id="pact" class="layer screen hidden">
+    <div class="sub">an altar, still warm</div>
+    <div id="pactText"></div>
+    <div class="cards" id="pactCards">
+      <div class="card cursed" id="pactCurse"></div>
+      <div class="card legendary" id="pactBoon"></div>
+    </div>
+    <div class="row"><button class="big" id="btnPactAccept">Accept</button><button class="big ghost" id="btnPactRefuse">Walk away</button></div>
   </div>
 
   <!-- door choice -->
