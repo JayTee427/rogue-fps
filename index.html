@@ -85,8 +85,15 @@
     input.seed { font: inherit; font-size: 14px; letter-spacing: .14em; text-transform: uppercase; padding: 12px; width: 180px; text-align: center; background: #0f1218; border: 1px solid #2a3140; color: var(--fg); border-radius: 6px; }
     label.chk { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; cursor: pointer; }
 
-    /* draft */
+    /* draft — wraps on desktop; on a phone it becomes a horizontal snap-scroller
+       so all three cards stay reachable with one thumb and never overflow the
+       viewport vertically */
     #draft .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+    @media (max-width: 640px) {
+      #draft .cards, #doors .cards { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 12px 14px; width: 100vw; -webkit-overflow-scrolling: touch; }
+      #draft .cards .card, #doors .cards .card { flex: 0 0 min(240px, 76vw); scroll-snap-align: center; }
+      .screen { justify-content: flex-start; padding-top: calc(28px + var(--safe-t)); overflow-y: auto; }
+    }
     .card { width: min(240px, 80vw); border: 2px solid #2a3140; border-radius: 10px; padding: 16px; background: #0f1218; text-align: left; cursor: pointer; transition: transform 80ms, border-color 80ms; }
     .card:hover, .card:active { transform: translateY(-3px); border-color: var(--fg); }
     .card .rar { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; }
