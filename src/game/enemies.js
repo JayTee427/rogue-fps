@@ -227,11 +227,21 @@ export class EnemyManager {
     const hits = [];
     for (const e of this.list) {
       if (!e.alive) continue;
+      // Hit volume is a vertical CAPSULE from the floor to the top of the mesh,
+      // not a sphere at mesh centre. A sphere makes low swarm enemies (Skitter
+      // at y=0.5) unhittable from eye height unless you aim at your own feet —
+      // and "standing still is how you die" means they are usually at your feet.
+      const s = e.mesh.scale.x || 1;
+      const r = e.radius * s * (e.archetype === "wisp" ? 1.4 : 1.25);
+      const top = e.mesh.position.y + r * 1.2, bottom = Math.max(0, e.mesh.position.y - r * 1.2);
+      // nearest point on the ray to the capsule axis (a vertical segment)
       const to = this._tmp.subVectors(e.mesh.position, origin);
-      const t = to.dot(dir);
+      let t = to.dot(dir);
       if (t < 0 || t > maxDist) continue;
-      const perp = Math.sqrt(Math.max(0, to.lengthSq() - t * t));
-      const r = e.radius * (e.mesh.scale.x || 1) * (e.archetype === "wisp" ? 1.4 : 1.15);
+      const px = origin.x + dir.x * t, py = origin.y + dir.y * t, pz = origin.z + dir.z * t;
+      const cy = Math.min(top, Math.max(bottom, py));
+      const dx = px - e.mesh.position.x, dy = py - cy, dz = pz - e.mesh.position.z;
+      const perp = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (perp <= r) {
         let blocked = false;
         if (e.archetype === "warden") {                       // shield: blocks if we're in front of it
