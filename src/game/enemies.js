@@ -5,11 +5,19 @@
 import * as THREE from "three";
 import { scaleEnemy, rollRoster, rollAffix } from "core/enemies.js";
 import { tickStatuses } from "core/combat.js";
+import { nextAttack } from "core/bosspatterns.js";
 import { COLORS } from "./renderer.js";
 import { SFX } from "./audio.js";
 
 const flat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 const EYE = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+
+// One colour per affix, used by the floor ring and the body detail so the two
+// always agree. Learn the colour once, read it forever.
+const AFFIX_COLOR = {
+  armoured: 0x9aa6b8, hasty: 0xffe14a, regenerating: 0x6cff9a, explosive: 0xff3a1e,
+  shielded: 0x4fd8ff, splitting: 0xc98aff, vampiric: 0xff2a6a,
+};
 
 // Bright, saturated, and each archetype its own hue — enemies must read
 // instantly against a dark station. `glow` is a constant emissive so they never
@@ -32,6 +40,7 @@ export class EnemyManager {
     this._tmp = new THREE.Vector3();
     this.projectiles = [];   // enemy shots: { mesh, vel, dmg, ttl }
     this.shards = [];        // death debris
+    this.pending = [];       // events raised outside update(), drained next frame
   }
 
   clear() {
@@ -69,10 +78,56 @@ export class EnemyManager {
     eye.position.set(0, look.size * 0.3, look.size * 0.5);
     mesh.add(eye);
     if (data.archetype === "warden") {
-      const shield = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.2, 0.15), new THREE.MeshBasicMaterial({ color: COLORS.accent2, transparent: true, opacity: 0.55 }));
-      shield.position.set(0, 0, 0.9);
-      mesh.add(shield);
-      mesh.userData.shield = shield;
+      // Two panels with a gap between them. The gap sweeps up and down, so the
+      // Warden is beatable by timing rather than by flanking alone — "you
+      // always know why you died" cuts both ways: you must see the opening.
+      const shieldMat = new THREE.MeshBasicMaterial({ color: COLORS.accent2, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 0.12), shieldMat);
+      const bot = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 0.12), shieldMat);
+      const rim = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.06, 0.14), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      top.position.set(0, 0.65, 0.9); bot.position.set(0, -0.65, 0.9); rim.position.set(0, 0, 0.92);
+      mesh.add(top); mesh.add(bot); mesh.add(rim);
+      mesh.userData.shieldTop = top; mesh.userData.shieldBot = bot; mesh.userData.shieldRim = rim;
+    }
+    // Affix visuals: an elite must be readable at a glance, and each affix has
+    // to say what it does before it does it.
+    if (data.affix) {
+      const A = data.affix;
+      // Ground ring first. Body details are legible in your face and invisible
+      // across the room; a lit disc on the floor reads at any range and is how
+      // you pick the dangerous one out of a crowd before it reaches you.
+      const ring = new THREE.Mesh(new THREE.RingGeometry(look.size * 0.85, look.size * 1.15, 24), new THREE.MeshBasicMaterial({ color: AFFIX_COLOR[A] ?? 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = -look.y + 0.04;                  // mesh sits at look.y; put the ring on the floor
+      mesh.add(ring);
+      mesh.userData.floorRing = ring;
+      if (A === "armoured") {
+        const plate = new THREE.Mesh(look.geo(), new THREE.MeshLambertMaterial({ color: 0x9aa6b8, flatShading: true, wireframe: true }));
+        plate.scale.multiplyScalar(1.18); mesh.add(plate);
+      } else if (A === "shielded") {
+        const bub = new THREE.Mesh(new THREE.SphereGeometry(look.size * 1.15, 12, 10), new THREE.MeshBasicMaterial({ color: 0x4fd8ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));
+        mesh.add(bub); mesh.userData.bubble = bub;
+      } else if (A === "explosive") {
+        const core = new THREE.Mesh(new THREE.SphereGeometry(look.size * 0.35, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff3a1e }));
+        core.position.y = look.size * 0.4; mesh.add(core); mesh.userData.core = core;
+      } else if (A === "regenerating") {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(look.size * 0.9, 0.05, 6, 20), new THREE.MeshBasicMaterial({ color: 0x6cff9a }));
+        ring.rotation.x = Math.PI / 2; mesh.add(ring); mesh.userData.ring = ring;
+      } else if (A === "splitting") {
+        const twin = new THREE.Mesh(look.geo(), new THREE.MeshBasicMaterial({ color: look.color, wireframe: true, transparent: true, opacity: 0.35 }));
+        twin.scale.multiplyScalar(0.55); twin.position.x = look.size * 0.5; mesh.add(twin);
+      } else if (A === "hasty") {
+        // Speed reads as smear: three ghosts trailing behind, fading back.
+        const ghosts = [];
+        for (let i = 1; i <= 3; i++) {
+          const g = new THREE.Mesh(look.geo(), new THREE.MeshBasicMaterial({ color: look.color, transparent: true, opacity: 0.3 / i }));
+          mesh.add(g); ghosts.push(g);
+        }
+        mesh.userData.ghosts = ghosts;
+      } else if (A === "vampiric") {
+        const halo = new THREE.Mesh(new THREE.TorusGeometry(look.size * 0.8, 0.04, 6, 18), new THREE.MeshBasicMaterial({ color: 0xff2a6a }));
+        halo.rotation.x = Math.PI / 3; mesh.add(halo); mesh.userData.ring = halo;
+      }
     }
     this.group.add(mesh);
     const e = {
@@ -88,7 +143,8 @@ export class EnemyManager {
 
   /** returns events: [{type:'hitPlayer', dmg}, {type:'kill', e}, {type:'popperBoom', pos, dmg}] */
   update(dt, player, arena, playerStats) {
-    const events = [];
+    const events = this.pending;
+    this.pending = [];
     this._updateShards(dt);
     const pp = player.pos;
     for (const e of this.list) {
@@ -101,6 +157,22 @@ export class EnemyManager {
         if (r.killed) { this._kill(e, events); continue; }
       } else e.slowMult = 1;
       if (e.regen) { e.regenT += dt; if (e.regenT > 1) { e.regenT = 0; e.hp = Math.min(e.maxHp, e.hp + e.regen); } }
+      // Keep the affix ring pinned to the floor. It is parented to a mesh that
+      // bobs, floats and scales during windups, so its local offset has to be
+      // recomputed rather than set once.
+      const fr = e.mesh.userData.floorRing;
+      if (fr) { fr.position.y = (-e.mesh.position.y + 0.04) / (e.mesh.scale.y || 1); fr.material.opacity = 0.55 + Math.sin(e.t * 3) * 0.3; }
+      // affix animation
+      if (e.affix === "regenerating" && e.mesh.userData.ring) { e.mesh.userData.ring.rotation.z += dt * 3; e.mesh.userData.ring.scale.setScalar(1 + Math.sin(e.t * 4) * 0.12); }
+      else if (e.affix === "vampiric" && e.mesh.userData.ring) { e.mesh.userData.ring.rotation.z -= dt * 2.4; }
+      else if (e.affix === "shielded" && e.mesh.userData.bubble) { e.mesh.userData.bubble.material.opacity = e.shield > 0 ? 0.16 + Math.sin(e.t * 5) * 0.07 : 0; }
+      else if (e.affix === "explosive" && e.mesh.userData.core) { e.mesh.userData.core.scale.setScalar(1 + Math.sin(e.t * 9) * 0.25); }
+      else if (e.affix === "hasty" && e.mesh.userData.ghosts) {
+        // Ghosts sit behind in local space; the mesh already faces travel, so
+        // -z is "behind". Offset grows with how fast we actually moved.
+        const sp = (e.lastStep ?? 0) * 40;
+        e.mesh.userData.ghosts.forEach((g, i) => { g.position.z = -(i + 1) * 0.22 * Math.min(1.6, sp); });
+      }
       if (e.hitFlash > 0) { e.hitFlash -= dt; if (e.hitFlash <= 0) this._restoreGlow(e); }
 
       const m = e.mesh;
@@ -108,6 +180,11 @@ export class EnemyManager {
       const dist = Math.hypot(dx, dz);
       const nx = dx / (dist || 1), nz = dz / (dist || 1);
       const spd = e.speed * (e.slowMult ?? 1);
+
+      if (e.bossId) {                                   // bosses run their own choreography
+        for (const ev of this.updateBoss(e, dt, player, arena)) events.push(ev);
+        continue;
+      }
 
       switch (e.archetype) {
         case "skitter": {                                            // swarm melee, jittery
@@ -140,12 +217,20 @@ export class EnemyManager {
           this._move(e, nx * spd * (1 + Math.min(1, e.t * 0.1)), nz * spd, dt, arena);
           const rate = Math.max(0.12, Math.min(1, dist / 12));
           e.beepT += dt; if (e.beepT > rate) { e.beepT = 0; SFX.popperBeep(1 - rate); m.material.emissive.setHex(0xffaa00); m.material.emissiveIntensity = 3.0; } else m.material.emissiveIntensity = Math.max(0.7, m.material.emissiveIntensity * 0.85);
-          if (dist < 1.6) { events.push({ type: "popperBoom", pos: m.position.clone(), dmg: e.damage, r: 3 }); this._kill(e, events, true); }
+          if (dist < 1.6) this._detonate(e, events, 0);
           break;
         }
-        case "warden": {                                             // slow advance, shield faces you
+        case "warden": {                                             // slow advance, shield faces you, gap sweeps
           this._move(e, nx * spd, nz * spd, dt, arena);
           m.lookAt(pp.x, m.position.y, pp.z);
+          // gap centre sweeps between -0.7 and +0.7 of body height
+          e.gapY = Math.sin(e.t * 1.6) * 0.7;
+          const half = 0.45;
+          if (m.userData.shieldTop) {
+            m.userData.shieldTop.position.y = e.gapY + half + 0.45;
+            m.userData.shieldBot.position.y = e.gapY - half - 0.45;
+            m.userData.shieldRim.position.y = e.gapY;
+          }
           e.voiceT = (e.voiceT ?? 0.5) - dt; if (e.voiceT <= 0 && dist < 12) { SFX.wardenHum(); e.voiceT = 2.2; }
           if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.2; }
           break;
@@ -157,7 +242,12 @@ export class EnemyManager {
           this._move(e, ox / od * spd, oz / od * spd, dt, arena);
           m.position.y = LOOKS.wisp.y + Math.sin(e.t * 3) * 0.6; m.rotation.y += dt * 2; m.rotation.x += dt * 1.3;
           e.voiceT = (e.voiceT ?? Math.random()) - dt; if (e.voiceT <= 0 && dist < 16) { SFX.wispWhine(); e.voiceT = 1.8 + Math.random(); }
-          if (e.cd <= 0) { this._shoot(e, pp, 14, e.damage, true); e.cd = 2.6; }
+          if (e.cd <= 0) {
+            // The design promises the Wisp DROPS MINES. Alternate: mine, shot, mine.
+            if ((e.dropCount = (e.dropCount ?? 0) + 1) % 2 === 1) events.push({ type: "dropMine", x: m.position.x, z: m.position.z, damage: e.damage * 1.2 });
+            else this._shoot(e, pp, 14, e.damage, true);
+            e.cd = 2.6;
+          }
           break;
         }
       }
@@ -176,8 +266,77 @@ export class EnemyManager {
     return events;
   }
 
+  /** A popper going off sets off every popper near it. Chains are the reason
+   *  a room of poppers is a puzzle ("pop the far one") and not just chip damage.
+   *  Depth-capped so a dense cluster can't recurse without bound. */
+  _detonate(e, events, depth = 0) {
+    if (!e.alive || e._boom) return;
+    e._boom = true;
+    const pos = e.mesh.position.clone();
+    const r = 3 + depth * 0.4;                       // each link reaches a touch further
+    events.push({ type: "popperBoom", pos, dmg: e.damage * (depth ? 0.8 : 1), r });
+    this._kill(e, events, true);
+    if (depth >= 4) return;
+    for (const o of this.list) {
+      if (o === e || !o.alive || o._boom || o.archetype !== "popper") continue;
+      if (o.mesh.position.distanceTo(pos) < r + 1.2) this._detonate(o, events, depth + 1);
+    }
+  }
+
+  /** Boss choreography. core/bosspatterns.js chooses WHAT and WHEN; this makes it
+   *  visible: every attack has a wind-up you can see and a name you can read. */
+  updateBoss(e, dt, player, arena) {
+    const events = [];
+    e.atkCd ??= 0; e.atkState ??= "idle"; e.atkT ??= 0;
+    const pp = player.pos, m = e.mesh;
+    const dx = pp.x - m.position.x, dz = pp.z - m.position.z;
+    const dist = Math.hypot(dx, dz);
+    const nx = dx / (dist || 1), nz = dz / (dist || 1);
+
+    switch (e.atkState) {
+      case "idle":
+        e.atkCd -= dt;
+        if (e.atkCd <= 0) {
+          e.atk = nextAttack(e.rng, e.bossId, e.hp / e.maxHp, e.atk?.shape ?? null);
+          e.atkState = "windup"; e.atkT = 0; e._hitThis = false;
+          events.push({ type: "bossTelegraph", text: e.atk.telegraph, secs: e.atk.windup });
+          SFX.sentinelCharge();
+        }
+        break;
+      case "windup":
+        m.material.emissive.setHex(0xff2010);
+        m.material.emissiveIntensity = 0.8 + (e.atkT / e.atk.windup) * 3.2;
+        m.scale.setScalar((e.baseScale ?? 1) * (1 + Math.sin(e.atkT * 26) * 0.05));
+        e.atkT += dt;
+        if (e.atkT >= e.atk.windup) {
+          e.atkState = "active"; e.atkT = 0;
+          this._restoreGlow(e); m.scale.setScalar(e.baseScale ?? 1);
+          events.push({ type: "bossAttack", shape: e.atk.shape, kind: e.atk.kind, pos: m.position.clone(), damage: e.damage });
+        }
+        break;
+      case "active":
+        e.atkT += dt;
+        if ((e.atk.kind === "melee" || e.atk.kind === "area") && dist < 4.5 && !e._hitThis) {
+          e._hitThis = true;
+          events.push({ type: "hitPlayer", dmg: e.damage, src: e });
+        }
+        if (e.atkT >= e.atk.duration) { e.atkState = "recover"; e.atkT = 0; e.atkCd = e.atk.cooldown; }
+        break;
+      case "recover":
+        e.atkT += dt;
+        if (e.atkT >= 0.2) { e.atkState = "idle"; e.atkT = 0; }
+        break;
+    }
+
+    m.lookAt(pp.x, m.position.y, pp.z);
+    // It only closes ground while idle — committed attacks do not track you.
+    if (e.atkState === "idle" && dist > 5) this._move(e, nx * e.speed * 0.35, nz * e.speed * 0.35, dt, arena);
+    return events;
+  }
+
   _move(e, vx, vz, dt, arena) {
     const m = e.mesh;
+    e.lastStep = Math.hypot(vx, vz) * dt;     // read by the hasty motion-smear
     m.position.x += vx * dt; m.position.z += vz * dt;
     m.position.x = THREE.MathUtils.clamp(m.position.x, -arena.halfW + 0.6, arena.halfW - 0.6);
     m.position.z = THREE.MathUtils.clamp(m.position.z, -arena.halfD + 0.6, arena.halfD - 0.6);
@@ -210,7 +369,10 @@ export class EnemyManager {
     e.hp = hpAfter;
     e.hitFlash = 0.08;
     e.mesh.material.emissive.setHex(0xffffff); e.mesh.material.emissiveIntensity = 0.8;
-    if (killed) this._kill(e, null);
+    // Deaths from player damage happen outside update(), so their events go to
+    // a queue that update() drains next frame. Poppers shot at range have to be
+    // able to explode, and that explosion is an event.
+    if (killed) this._kill(e, this.pending);
     return killed;
   }
 
@@ -222,11 +384,23 @@ export class EnemyManager {
 
   _kill(e, events, silent = false) {
     if (!e.alive) return;
+    // Shooting a popper must set it off too — a dead bomb that doesn't explode
+    // reads as a bug, and it removes the whole "shoot it at range" decision.
+    if (e.archetype === "popper" && !e._boom && events) { this._detonate(e, events, 0); return; }
     e.alive = false;
     this.group.remove(e.mesh);
     if (!silent) SFX.kill();
     if (events) events.push({ type: "kill", e });
     this._shatter(e);
+    // Splitting: two smaller, faster copies. Never recurse — the children carry
+    // no affix, or one elite could fill the room.
+    if (e.affix === "splitting" && !e.isSplit) {
+      for (const off of [-0.8, 0.8]) {
+        const child = this.spawn({ ...e, affix: null, hp: Math.max(1, Math.round(e.maxHp * 0.35)), maxHp: Math.max(1, Math.round(e.maxHp * 0.35)), damage: e.damage * 0.6, speed: e.speed * 1.3 },
+          e.mesh.position.x + off, e.mesh.position.z, false);
+        child.isSplit = true; child.mesh.scale.multiplyScalar(0.65); child.radius *= 0.65;
+      }
+    }
   }
 
   /** Death: the mesh breaks into flying shards that tumble, fall, and fade.
@@ -282,9 +456,15 @@ export class EnemyManager {
       const perp = Math.sqrt(dx * dx + dy * dy + dz * dz);
       if (perp <= r) {
         let blocked = false;
-        if (e.archetype === "warden") {                       // shield: blocks if we're in front of it
+        if (e.archetype === "warden") {
+          // Blocked only if we hit the FRONT and missed the sweeping gap. The
+          // gap is the counterplay; without this check the Warden is a wall.
           const f = new THREE.Vector3(0, 0, 1).applyQuaternion(e.mesh.quaternion);
-          blocked = f.dot(dir) < -0.35;
+          const fromFront = f.dot(dir) < -0.35;
+          const hitY = origin.y + dir.y * t;                  // world height of the impact
+          const gapWorldY = e.mesh.position.y + (e.gapY ?? 0);
+          const throughGap = Math.abs(hitY - gapWorldY) < 0.42;
+          blocked = fromFront && !throughGap;
         }
         hits.push({ e, t, headshot: false, blocked });
       }

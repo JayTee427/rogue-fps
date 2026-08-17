@@ -36,6 +36,16 @@ export class HazardView {
     return this.hazards.length;
   }
 
+  /** Wisps lay mines mid-fight. Same hazard shape core/hazards.js produces, so
+   *  stepHazards() drives it identically — no second code path to keep in sync. */
+  addMine(x, z, damage) {
+    if (this.hazards.length > 40) return;            // a long Wisp fight must not carpet the floor
+    const h = { id: `wispmine${this._mineN = (this._mineN ?? 0) + 1}`, kind: "mines", x, z, radius: 1.3, armed: true, damage, blast: 3.2 };
+    this.hazards.push(h);
+    this.meshes.set(h.id, this._build(h));
+    return h;
+  }
+
   _build(h) {
     let m;
     switch (h.kind) {

@@ -11,6 +11,7 @@ import { dailySeed, formatSeed, parseSeed } from "core/daily.js";
 import { pickQualityTier } from "core/quality.js";
 import { aimAssist } from "core/assist.js";
 import { ITEM_BY_ID } from "core/items.js";
+import { flavourFor } from "core/codex.js";
 import { scaleEnemy } from "core/enemies.js";
 import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
 
@@ -25,6 +26,7 @@ import { FX } from "./fx.js";
 import { HazardView } from "./hazardView.js";
 import { TIERS } from "core/quality.js";
 import { chainTargets, singularityPull, explosionVictims } from "core/fxitems.js";
+import { applyRun, serializeProfile, deserializeProfile, profileSummary, UNLOCKS } from "core/meta.js";
 
 // ------------------------------------------------------------------ boot --
 const $ = (s) => document.querySelector(s);
@@ -51,6 +53,7 @@ const enemies = new EnemyManager(scene);
 const fx = new FX(scene, camera, TIERS[tierName]);
 const hazards = new HazardView(scene);
 let music = null;
+let profile = deserializeProfile(localStorage.getItem("hs_profile"));
 
 // ------------------------------------------------------------------ state --
 const G = {
@@ -106,6 +109,7 @@ function beginRun(seed, cursesEnabled) {
   G.run = newRun(seed, { cursesEnabled });
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
+  G.runStartedAt = performance.now();
   SFX.startAmbient();
   music = new MusicPlayer(makeRng(seed).fork("music"));
   music.start();
@@ -175,6 +179,9 @@ function enterBoss() {
   data.hp = b.hp; data.maxHp = b.hp; data.damage *= 1.6; data.name = b.name;
   const boss = enemies.spawn(data, 0, -8, true);
   boss.mesh.scale.multiplyScalar(1.7); boss.radius *= 1.7; boss.isBoss = true;
+  // Choreography: core/bosspatterns.js picks the attacks, enemies.js performs them.
+  boss.bossId = b.id; boss.rng = seedRng.fork("attacks"); boss.baseScale = boss.mesh.scale.x;
+  boss.atkCd = 1.8;                       // a beat to breathe before the first tell
   if (b.id === "chorus") { for (const dx of [-5, 5]) { const m = scaleEnemy("sentinel", r.floor, 4, null); m.hp = Math.round(b.hp * 0.35); m.maxHp = m.hp; const e = enemies.spawn(m, dx, -9, true); e.mesh.scale.multiplyScalar(1.2); e.radius *= 1.2; e.isBossAdd = true; } }
   G.boss = boss; G.bossMode = true; G.roomActive = true; G.roomCleared = false; G.roomTimer = 0;
   $("#roomNum").textContent = "BOSS"; $("#modName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`;
@@ -206,7 +213,8 @@ function openDraft() {
   r.draft.forEach((it, i) => {
     const c = document.createElement("div");
     c.className = `card ${it.rarity}`;
-    c.innerHTML = `<div class="rar">${it.rarity}</div><h3>${it.name}</h3><p>${it.desc || describe(it)}</p>${it.stacks ? '<div class="stack">STACKS</div>' : ""}${it.requires ? `<div class="stack">REQUIRES ${ITEM_BY_ID[it.requires]?.name ?? it.requires}</div>` : ""}`;
+    const flav = flavourFor(it.id);
+    c.innerHTML = `<div class="rar">${it.rarity}</div><h3>${it.name}</h3><p>${it.desc || describe(it)}</p>${it.stacks ? '<div class="stack">STACKS</div>' : ""}${it.requires ? `<div class="stack">REQUIRES ${ITEM_BY_ID[it.requires]?.name ?? it.requires}</div>` : ""}${flav ? `<div class="flav">${flav}</div>` : ""}`;
     c.addEventListener("click", () => { SFX.pickup(); afterReward(i); });
     wrap.appendChild(c);
   });
@@ -311,6 +319,16 @@ function endRun(kind) {
   $("#repSeed").textContent = `SEED ${G.seedText}`;
   show("#report");
   if (kind === "dead") SFX.death();
+  // Meta-progression: totals and unlocks survive the run. itemsHeld is the
+  // ARRAY, not its length — meta.js counts it itself.
+  const meta = applyRun(profile, {
+    floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
+    bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted",
+    score: sc, itemsHeld: r.held, secs: Math.round((performance.now() - (G.runStartedAt ?? performance.now())) / 1000),
+  });
+  profile = meta.profile;
+  localStorage.setItem("hs_profile", serializeProfile(profile));
+  if (meta.newlyUnlocked.length) toast("UNLOCKED — " + meta.newlyUnlocked.map((id) => UNLOCKS[id].name).join(" · "), false, 3600);
 }
 
 function renderItems() {
@@ -425,11 +443,63 @@ function onKill(e, res) {
   if (!G.bossMode && enemies.aliveCount === 0) onRoomCleared();
 }
 
+// Each attack shape resolves to something the player can see and react to. The
+// wind-up already happened — this is the moment it lands.
+function onBossAttack(ev) {
+  const p = ev.pos;
+  switch (ev.shape) {
+    case "shockwave":
+    case "charge_slam": {
+      fx.trauma(0.55); SFX.explosion();
+      explode(p, 9, ev.damage * 0.7);
+      const d = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
+      if (d < 9) damagePlayer(ev.damage * (1 - d / 9), "boss");
+      break;
+    }
+    case "mortar_volley": {
+      // Shells land around the player: move, or wear them.
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + Math.random();
+        hazards.addMine(player.pos.x + Math.cos(a) * 4.5, player.pos.z + Math.sin(a) * 4.5, ev.damage * 0.5);
+      }
+      SFX.explosion(); fx.trauma(0.25);
+      break;
+    }
+    case "sweep_beam": {
+      fx.trauma(0.3); SFX.sentinelCharge();
+      const d = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
+      if (d < 22) damagePlayer(ev.damage * 0.8, "beam");
+      break;
+    }
+    case "summon_adds": {
+      const r = G.run;
+      for (const dx of [-4, 4]) {
+        const m = scaleEnemy("skitter", r.floor, 4, null);
+        enemies.spawn(m, p.x + dx, p.z + 2, false);
+      }
+      SFX.bossRoar();
+      break;
+    }
+    default: {                                  // spore_cloud and anything new
+      explode(p, 7, ev.damage * 0.5); fx.trauma(0.3);
+      const d = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
+      if (d < 7) damagePlayer(ev.damage * 0.6, "boss");
+    }
+  }
+}
+
 function explode(pos, radius, dmg) {
   fx.explosion(pos, radius);
-  const pool = enemies.list.filter(e => e.alive).map(e => ({ id: e.mesh.uuid, x: e.mesh.position.x, y: e.mesh.position.y, z: e.mesh.position.z, ref: e }));
+  SFX.explosion(Math.min(2, radius / 4));
+  // explosionVictims returns plain data and does NOT carry `ref` back through,
+  // so resolve the enemy by id. Reading v.ref threw on every explosion that
+  // actually caught something.
+  const byId = new Map(enemies.list.filter(e => e.alive).map(e => [e.mesh.uuid, e]));
+  const pool = [...byId].map(([id, e]) => ({ id, x: e.mesh.position.x, y: e.mesh.position.y, z: e.mesh.position.z }));
   for (const v of explosionVictims({ x: pos.x, y: pos.y, z: pos.z }, radius, pool)) {
-    const e = v.ref, d = dmg * v.falloff, hp = Math.max(0, e.hp - d);
+    const e = v.ref ?? byId.get(v.id);
+    if (!e || !e.alive) continue;
+    const d = dmg * v.falloff, hp = Math.max(0, e.hp - d);
     fx.number(d, e.mesh.position, "hit", e.mesh.uuid);
     if (enemies.damage(e, d, hp, hp <= 0)) onKill(e, { damage: d });
   }
@@ -461,6 +531,9 @@ function frame(now) {
       const events = enemies.update(dt, player, G.arena, s2);
       for (const ev of events) {
         if (ev.type === "hitPlayer") { damagePlayer(ev.dmg, ev.projectile ? "projectile" : ("melee:" + (ev.src?.archetype ?? "?"))); if (ev.src && G.run.stats.thorns) { const hp = Math.max(0, ev.src.hp - G.run.stats.thorns); enemies.damage(ev.src, G.run.stats.thorns, hp, hp <= 0) && onKill(ev.src, { damage: 0 }); } }
+        else if (ev.type === "bossTelegraph") { toast(ev.text, true, Math.round(ev.secs * 1000)); SFX.ui(); }
+        else if (ev.type === "bossAttack") { onBossAttack(ev); }
+        else if (ev.type === "dropMine") { hazards.addMine(ev.x, ev.z, ev.damage); SFX.ui(); }
         else if (ev.type === "popperBoom") { const d = player.pos.distanceTo(ev.pos); if (d < ev.r) damagePlayer(ev.dmg * (1 - d / ev.r), "popper"); explode(ev.pos, ev.r, ev.dmg * 0.5); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
         else if (ev.type === "kill") { if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
       }
@@ -526,7 +599,7 @@ function frame(now) {
 // -------------------------------------------------------------- menu wiring --
 function menu() {
   input.releaseLock();
-  $("#bestLine").textContent = G.best ? `BEST ${G.best.toLocaleString()}` : "";
+  $("#bestLine").textContent = (G.best ? `BEST ${G.best.toLocaleString()} · ` : "") + profileSummary(profile).text;
   $("#menuHint").textContent = input.isTouch ? "left thumb: move · right thumb: look · buttons: fire / dash / jump / reload" : "WASD · mouse · shift dash · space jump · R reload · click to lock";
   show("#menu");
 }
@@ -551,6 +624,7 @@ document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, {
 if (new URLSearchParams(location.search).has("dev")) {
   window.__hs = {
     G, enemies, player, fx, hazards, renderer, scene, camera, THREE,
+    scaleEnemy, rollWeapon,
     get music() { return music; },
     // Drive the loop by hand. requestAnimationFrame is paused whenever the tab
     // is not compositing (headless verification, background pane), so without
@@ -559,6 +633,7 @@ if (new URLSearchParams(location.search).has("dev")) {
     snap() { render(); return renderer.domElement.toDataURL("image/png"); },
     clearRoom() { for (const e of enemies.list) if (e.alive) enemies._kill(e, null, true); if (G.bossMode) { G.roomActive = false; G.roomCleared = true; G.arena.exit.material.opacity = 0.75; } else onRoomCleared(); },
     toExit() { player.pos.x = G.arena.exitPos.x; player.pos.z = G.arena.exitPos.z; },
+    toBoss() { G.run = { ...G.run, phase: "boss" }; enterBoss(); },
     god() { G.invuln = 1e9; },
   };
 }

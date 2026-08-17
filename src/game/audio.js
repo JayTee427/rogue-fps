@@ -213,6 +213,30 @@ export const SFX = {
     [392, 523, 659, 784].forEach((f, i) => osc("triangle", f, t + i * 0.09, 0.3, 0.4));
     osc("sine", 55, t, 0.5, 0.2);
   },
+  /** A real blast: sub-thump under a low-passed noise body. Explosions were
+   *  silent until now — the loudest thing in the game had no sound at all. */
+  explosion(size = 1) {
+    if (!ctx || muted) return;
+    const t = ctx.currentTime;
+    const sz = Math.max(0.5, Math.min(2, size));
+    // sub: pitch drops away fast, which is what reads as WEIGHT
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(120 * sz, t);
+    o.frequency.exponentialRampToValueAtTime(30, t + 0.26);
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.linearRampToValueAtTime(0.5 * sz, t + 0.012);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    o.connect(og); og.connect(master);
+    o.start(t); o.stop(t + 0.45);
+    // body: noise through a filter that closes as it decays
+    const n = noise(0.45, "lowpass", 2400, 1, 0.5 * sz);
+    n.g.gain.setValueAtTime(0.0001, t);
+    n.g.gain.linearRampToValueAtTime(0.45 * sz, t + 0.008);
+    n.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    n.src.start(t);
+  },
+
   bossRoar() {
     if (!ctx || muted) return;
     const t = ctx.currentTime;
