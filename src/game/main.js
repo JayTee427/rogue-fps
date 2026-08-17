@@ -3,7 +3,7 @@
 
 import * as THREE from "three";
 import { rng as makeRng } from "core/rng.js";
-import { newRun, startFloor, clearRoom, takeReward, chooseDoor, beatBoss, extract, die, canExtract } from "core/run.js";
+import { newRun, startFloor, clearRoom, takeReward, chooseDoor, beatBoss, extract, die, canExtract, swapWeapon } from "core/run.js";
 import { resolveHit } from "core/combat.js";
 import { ROOM_MODIFIERS, BOSSES } from "core/floor.js";
 import { scoreRun } from "core/score.js";
@@ -12,13 +12,15 @@ import { pickQualityTier } from "core/quality.js";
 import { aimAssist } from "core/assist.js";
 import { ITEM_BY_ID } from "core/items.js";
 import { scaleEnemy } from "core/enemies.js";
+import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
 
 import { createRenderer, buildArena, COLORS } from "./renderer.js";
 import { Player } from "./player.js";
 import { Input } from "./input.js";
 import { WeaponView } from "./weaponView.js";
 import { EnemyManager } from "./enemies.js";
-import { initAudio, resumeAudio, SFX } from "./audio.js";
+import { initAudio, resumeAudio, SFX, duckMusic } from "./audio.js";
+import { MusicPlayer } from "./musicPlayer.js";
 import { FX } from "./fx.js";
 import { HazardView } from "./hazardView.js";
 import { TIERS } from "core/quality.js";
@@ -29,8 +31,11 @@ const $ = (s) => document.querySelector(s);
 const show = (id) => { for (const l of document.querySelectorAll(".layer")) l.classList.add("hidden"); if (id) $(id).classList.remove("hidden"); };
 
 function benchmark() {
+  // Deliberately small: this is a rough floor for very weak devices, not the
+  // real decision. A CPU spin measures JS math, not the GPU — the first version
+  // graded a machine running at 240 FPS as "low" and switched bloom off.
   const t0 = performance.now();
-  let x = 0; for (let i = 0; i < 2_000_000; i++) x += Math.sqrt(i) * Math.sin(i);
+  let x = 0; for (let i = 0; i < 400_000; i++) x += Math.sqrt(i) * Math.sin(i);
   return performance.now() - t0 + (x === 42 ? 1 : 0);
 }
 const isMobile = matchMedia("(pointer: coarse)").matches;
@@ -45,6 +50,7 @@ const weaponView = new WeaponView(camera, scene);
 const enemies = new EnemyManager(scene);
 const fx = new FX(scene, camera, TIERS[tierName]);
 const hazards = new HazardView(scene);
+let music = null;
 
 // ------------------------------------------------------------------ state --
 const G = {
@@ -53,7 +59,41 @@ const G = {
   bossMode: false, boss: null, extractHold: 0, roomTimer: 0, killsThisRoom: 0,
   lastFrame: performance.now(), best: Number(localStorage.getItem("hs_best") || 0),
   fpsAcc: 0, fpsN: 0, seedText: "",
+  qTier: tierName, qWindow: [], qCooldown: 3,
 };
+
+// --- adaptive quality -------------------------------------------------------
+// Judge the renderer by the only measure that matters: are we holding frame
+// rate? Sustained <50 fps drops a tier; sustained >110 with headroom raises one.
+const TIER_ORDER = ["low", "medium", "high"];
+function governQuality(dt) {
+  if (!G.run) return;
+  G.qCooldown -= dt;
+  G.qWindow.push(dt);
+  if (G.qWindow.length > 90) G.qWindow.shift();
+  if (G.qWindow.length < 90 || G.qCooldown > 0) return;
+  const avg = G.qWindow.reduce((a, b) => a + b, 0) / G.qWindow.length;
+  const fps = 1 / Math.max(avg, 1e-4);
+  const i = TIER_ORDER.indexOf(G.qTier);
+  let next = i;
+  if (fps < 50 && i > 0) next = i - 1;
+  else if (fps > 110 && i < 2 && !isMobile) next = i + 1;
+  if (next !== i) {
+    G.qTier = TIER_ORDER[next];
+    applyQuality(G.qTier);
+    G.qCooldown = 6;
+    G.qWindow.length = 0;
+  }
+}
+
+function applyQuality(tier) {
+  const t = TIERS[tier];
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * t.resScale);
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  if (R.bloom) R.bloom.enabled = tier !== "low";
+  renderer.shadowMap.enabled = !!t.shadows;
+  $("#perf").dataset.tier = tier;
+}
 
 function toast(text, warn = false, ms = 1400) {
   const t = $("#toast"); t.textContent = text; t.className = "on" + (warn ? " warn" : "");
@@ -67,6 +107,8 @@ function beginRun(seed, cursesEnabled) {
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
   SFX.startAmbient();
+  music = new MusicPlayer(makeRng(seed).fork("music"));
+  music.start();
   onFloorStart(true);
 }
 
@@ -105,6 +147,7 @@ function enterRoom() {
   hazards.spawn(seedRng.fork("hazards"), room.hazardTag, G.arena, r.floor);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
   $("#bossbar").classList.add("hidden");
+  music?.setBoss(false);
   G.roomTimer = G.mods.timePressure ? 60 : 0;
   G.shield = r.stats.roomShield ?? 0;
   scene.fog.density = G.mods.darkness ? 0.11 : 0.028;
@@ -136,6 +179,7 @@ function enterBoss() {
   G.boss = boss; G.bossMode = true; G.roomActive = true; G.roomCleared = false; G.roomTimer = 0;
   $("#roomNum").textContent = "BOSS"; $("#modName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`;
   $("#bossName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`; $("#bossFill").style.width = "100%"; $("#bossbar").classList.remove("hidden");
+  music?.setBoss(true);
   toast(`${b.name} — ${b.affix}`, true, 2600); SFX.bossRoar();
   weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
 }
@@ -153,9 +197,11 @@ function onRoomCleared() {
 }
 
 function openDraft() {
+  const rewardType = G.run.currentFloor.rooms[G.run.roomIndex].rewardType;
   G.run = clearRoom(G.run, { kills: G.killsThisRoom });
-  const r = G.run;
   input.releaseLock();
+  if (rewardType === "weapon") return openWeaponOffer();
+  const r = G.run;
   const wrap = $("#draftCards"); wrap.innerHTML = "";
   r.draft.forEach((it, i) => {
     const c = document.createElement("div");
@@ -179,6 +225,54 @@ function afterReward(index) {
   applyStats(); renderItems();
   if (G.run.phase === "door") openDoors();
   else if (G.run.phase === "boss") enterBoss();
+}
+
+function statRow(k, label, cur, next, higherIsBetter = true) {
+  const d = next - cur;
+  const cls = Math.abs(d) < 1e-6 ? "same" : (d > 0) === higherIsBetter ? "up" : "down";
+  const fmt = (v) => Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1);
+  return `<span class="k">${label}</span><span class="v">${fmt(next)}</span><span class="d ${cls}">${d === 0 ? "—" : (d > 0 ? "+" : "") + fmt(d)}</span>`;
+}
+
+function openWeaponOffer() {
+  const r = G.run;
+  const rr = makeRng(r.seed).fork(`weapon${r.floor}-${r.roomIndex}`);
+  const arch = rr.pick(Object.keys(ARCHETYPES));
+  const offered = rollWeapon(rr, arch, r.floor);
+  G.offeredWeapon = offered;
+  const held = r.weapon;
+  const wrap = $("#weaponCards"); wrap.innerHTML = "";
+  const card = (w, isHeld) => {
+    const s = w.stats, dps = (s.damage * (s.pellets ?? 1) * s.fireRate);
+    const hs = held.stats, heldDps = (hs.damage * (hs.pellets ?? 1) * hs.fireRate);
+    const rows = isHeld ? "" : [
+      statRow("dps", "DPS", heldDps, dps),
+      statRow("damage", "damage", hs.damage, s.damage),
+      statRow("fireRate", "rate", hs.fireRate, s.fireRate),
+      statRow("magSize", "mag", hs.magSize, s.magSize),
+      statRow("spread", "spread", hs.spread, s.spread, false),
+      statRow("reloadTime", "reload", hs.reloadTime, s.reloadTime, false),
+    ].join("");
+    const el = document.createElement("div");
+    el.className = `card wcard ${w.rarity}${isHeld ? " held" : ""}`;
+    el.innerHTML = `<div class="rar">${isHeld ? "held · " : ""}${w.rarity}</div>
+      <div class="arch">${ARCHETYPES[w.archetype].name.toUpperCase()}</div>
+      <div class="mods">${w.mods.map(id => `<span>${WEAPON_MODS[id]?.name ?? id}</span>`).join("")}</div>
+      ${isHeld ? `<div class="wstats"><span class="k">DPS</span><span class="v">${heldDps.toFixed(0)}</span><span class="d same"></span></div>` : `<div class="wstats">${rows}</div>`}`;
+    return el;
+  };
+  wrap.appendChild(card(held, true));
+  wrap.appendChild(card(offered, false));
+  show("#weaponOffer");
+}
+
+function resolveWeapon(take) {
+  if (take) { G.run = swapWeapon(G.run, G.offeredWeapon); weaponView.equip(G.run.weapon); SFX.pickup(); fx.pickup(player.pos.clone()); }
+  else SFX.ui();
+  G.offeredWeapon = null;
+  renderItems();
+  G.run = takeReward(G.run, null);        // resolve the reward phase, taking no item
+  if (G.run.phase === "door") openDoors(); else if (G.run.phase === "boss") enterBoss();
 }
 
 function openDoors() {
@@ -205,6 +299,7 @@ function endRun(kind) {
   const r = G.run;
   input.releaseLock();
   SFX.stopAmbient();
+  music?.stop(); music = null;
   const sc = r.finalScore;
   if (sc > G.best) { G.best = sc; localStorage.setItem("hs_best", String(sc)); }
   $("#repSub").textContent = kind === "extracted" ? "extracted · banked" : "run over";
@@ -317,7 +412,7 @@ function fire(want, dt) {
 function onKill(e, res) {
   const s = G.run.stats;
   G.killsThisRoom++;
-  fx.kill(e.mesh.position); fx.trauma(0.28); G.hitstop = Math.max(G.hitstop, 0.05);
+  fx.kill(e.mesh.position); fx.trauma(0.28); duckMusic(0.3, 0.2); G.hitstop = Math.max(G.hitstop, 0.05);
   heal(s.healOnKill ?? 0);
   if (s.dashOnKill) player.dashCd = 0;
   if (s.onKillExplode > 0) explode(e.mesh.position, 2.5, res.damage * s.onKillExplode);
@@ -398,6 +493,12 @@ function frame(now) {
     const frac = G.hp / G.run.maxHp;
     if (frac < 0.4 && (G.roomActive || G.bossMode)) { G.beatT = (G.beatT ?? 0) - dt; if (G.beatT <= 0) { SFX.heartbeat(frac); G.beatT = 0.45 + frac * 1.6; } }
     fx.update(dt, G.camBase ?? { x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z });
+    // adaptive score: more enemies and lower health = more intense
+    if (music) {
+      const threat = Math.min(1, enemies.aliveCount / 6);
+      const peril = 1 - Math.min(1, G.hp / G.run.maxHp);
+      music.setTarget((G.roomActive || G.bossMode) ? Math.max(0.35, threat * 0.7 + peril * 0.5) : 0.12, dt);
+    }
 
     // exit pad
     if (G.roomCleared && G.arena) {
@@ -416,7 +517,8 @@ function frame(now) {
     $("#dmgflash").classList.toggle("on", G.dmgFlash > 0.05 || (G.hp / G.run.maxHp) < 0.25 && Math.sin(now / 120) > 0);
     if (G.mods.timePressure && G.roomActive) $("#modName").textContent = `COUNTDOWN ${Math.ceil(G.roomTimer)}`;
     // fps counter (dev)
-    G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${tierName.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
+    governQuality(dt || 0.016);
+    G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${G.qTier.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
   }
   render();
 }
@@ -433,6 +535,8 @@ $("#btnRun").addEventListener("click", () => {
   const seed = txt ? (parseSeed(txt) ?? (Math.random() * 2 ** 32) >>> 0) : (Math.random() * 2 ** 32) >>> 0;
   beginRun(seed, $("#chkCurses").checked);
 });
+$("#btnSwap").addEventListener("click", () => resolveWeapon(true));
+$("#btnKeep").addEventListener("click", () => resolveWeapon(false));
 $("#btnDaily").addEventListener("click", () => beginRun(dailySeed(), $("#chkCurses").checked));
 $("#btnDeeper").addEventListener("click", () => { SFX.ui(); enterFloor(); });
 $("#btnExtract").addEventListener("click", () => { G.run = extract(G.run); SFX.extract(); endRun("extracted"); });
@@ -447,6 +551,11 @@ document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, {
 if (new URLSearchParams(location.search).has("dev")) {
   window.__hs = {
     G, enemies, player, fx, hazards, renderer, scene, camera, THREE,
+    get music() { return music; },
+    // Drive the loop by hand. requestAnimationFrame is paused whenever the tab
+    // is not compositing (headless verification, background pane), so without
+    // this there is no way to exercise frame logic in a test harness.
+    step(n = 60, dtMs = 16.7) { for (let i = 0; i < n; i++) { G.lastFrame = performance.now() - dtMs; frame(performance.now()); } },
     snap() { render(); return renderer.domElement.toDataURL("image/png"); },
     clearRoom() { for (const e of enemies.list) if (e.alive) enemies._kill(e, null, true); if (G.bossMode) { G.roomActive = false; G.roomCleared = true; G.arena.exit.material.opacity = 0.75; } else onRoomCleared(); },
     toExit() { player.pos.x = G.arena.exitPos.x; player.pos.z = G.arena.exitPos.z; },

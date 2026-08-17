@@ -109,6 +109,17 @@
     .card.legendary { border-color: var(--legend); box-shadow: 0 0 24px rgba(255,179,71,.25); } .card.legendary .rar { color: var(--legend); }
     .card.cursed { border-color: var(--cursed); } .card.cursed .rar { color: var(--cursed); }
     .card .stack { font-size: 10px; color: var(--accent2); letter-spacing: .1em; }
+    /* weapon offer: a compare card, held vs offered */
+    .wcard { width: min(300px, 88vw); }
+    .wcard .arch { font-size: 20px; letter-spacing: .06em; margin: 4px 0 2px; }
+    .wcard .mods { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .wcard .mods span { font-size: 10px; padding: 3px 6px; border: 1px solid #2a3140; border-radius: 3px; color: var(--accent2); }
+    .wstats { display: grid; grid-template-columns: auto auto auto; gap: 3px 10px; font-size: 12px; margin-top: 8px; align-items: center; }
+    .wstats .k { color: var(--dim); }
+    .wstats .v { text-align: right; }
+    .wstats .d { text-align: right; font-weight: 700; }
+    .wstats .d.up { color: #6cff9a; } .wstats .d.down { color: #ff6b6b; } .wstats .d.same { color: var(--dim); }
+    #weaponOffer .held { opacity: .55; }
 
     /* doors */
     #doors .cards .card { text-align: center; }
@@ -184,6 +195,13 @@
     <div class="sub">room clear · choose one</div>
     <div class="cards" id="draftCards"></div>
     <div class="row"><button class="big ghost" id="btnSkip">Take nothing</button><button class="big ghost hidden" id="btnReroll">Reroll</button></div>
+  </div>
+
+  <!-- weapon offer -->
+  <div id="weaponOffer" class="layer screen hidden">
+    <div class="sub">weapons cache · swap or keep</div>
+    <div class="cards" id="weaponCards"></div>
+    <div class="row"><button class="big" id="btnSwap">Take It</button><button class="big ghost" id="btnKeep">Keep Mine</button></div>
   </div>
 
   <!-- door choice -->

@@ -37,6 +37,16 @@ describe("core module imports resolve", () => {
     });
   }
 
+  it("no core module imports from ITSELF", () => {
+    // Vitest resolves a self-import silently; the browser throws
+    // "Identifier 'X' has already been declared" and the whole app fails to
+    // boot. Laguna's music.js shipped exactly this.
+    for (const f of files) {
+      const src = readFileSync(join(coreDir, f), "utf-8");
+      expect(src, `${f} imports from itself`).not.toMatch(new RegExp(`from\\s+["']core/${f.replace(".", "\\.")}["']`));
+    }
+  });
+
   it("no core module imports from src/game or three or the DOM", () => {
     for (const f of files) {
       const src = readFileSync(join(coreDir, f), "utf-8");

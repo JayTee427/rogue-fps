@@ -7,6 +7,7 @@ let ctx = null;
 let master = null;
 let muted = false;
 let ambient = null;
+let musicBus = null;
 
 export function initAudio() {
   if (ctx) return;
@@ -18,6 +19,22 @@ export function initAudio() {
   comp.ratio.value = 4;
   master.connect(comp);
   comp.connect(ctx.destination);
+  // Music sits on its own bus, ducked below SFX so cues always cut through.
+  musicBus = ctx.createGain();
+  musicBus.gain.value = 0.5;
+  musicBus.connect(comp);
+}
+
+/** Accessors for the music player — it needs the same context and its own bus. */
+export function getCtx() { return ctx; }
+export function getMusicBus() { return musicBus; }
+/** Duck the music briefly (used on big hits so the SFX reads). */
+export function duckMusic(amount = 0.35, secs = 0.25) {
+  if (!ctx || !musicBus) return;
+  const t = ctx.currentTime, base = muted ? 0 : 0.5;
+  musicBus.gain.cancelScheduledValues(t);
+  musicBus.gain.setValueAtTime(base * (1 - amount), t);
+  musicBus.gain.linearRampToValueAtTime(base, t + secs);
 }
 
 export function resumeAudio() {
@@ -27,6 +44,7 @@ export function resumeAudio() {
 export function setMuted(m) {
   muted = m;
   if (master) master.gain.value = m ? 0 : 0.35;
+  if (musicBus) musicBus.gain.value = m ? 0 : 0.5;
 }
 
 function env(node, t0, a, d, s = 0, r = 0.05, peak = 1) {

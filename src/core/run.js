@@ -3,7 +3,7 @@ import { ITEM_BY_ID } from "core/items.js";
 import { computeStats, BASE_STATS } from "core/stats.js";
 import { draftRewards } from "core/draft.js";
 import { generateFloor } from "core/floor.js";
-import { rollWeapon } from "core/weapons.js";
+import { rollWeapon, ARCHETYPES } from "core/weapons.js";
 import { scoreRun } from "core/score.js";
 
 export function newRun(seed, opts = {}) {
@@ -159,4 +159,16 @@ export function die(run) {
     banked: 0,
     finalScore: score,
   };
+}
+/**
+ * Swap the run's weapon for a rolled one (a "weapon" reward room). Returns a
+ * NEW run; the phase is untouched so the caller still resolves the reward
+ * normally afterwards. Validates the weapon so a malformed roll can never leave
+ * the player holding something the viewmodel cannot draw.
+ */
+export function swapWeapon(run, weapon) {
+  if (run.phase === "dead" || run.phase === "extracted") throw new Error("run is over");
+  if (!weapon || !ARCHETYPES[weapon.archetype]) throw new Error("swapWeapon: unknown archetype");
+  if (!weapon.stats || typeof weapon.stats.damage !== "number") throw new Error("swapWeapon: weapon has no stats");
+  return { ...run, weapon };
 }
