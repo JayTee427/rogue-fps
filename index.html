@@ -55,6 +55,11 @@
     #toast.on { opacity: 1; }
     #toast.warn { color: var(--accent); }
     #dashcd { position: absolute; left: 50%; bottom: calc(60px + var(--safe-b)); transform: translateX(-50%); width: 60px; height: 4px; background: #1a1f28; border-radius: 2px; overflow: hidden; }
+    #bossbar { position: absolute; top: calc(44px + var(--safe-t)); left: 50%; transform: translateX(-50%); width: min(60vw, 520px); text-align: center; }
+    #bossbar #bossName { font-size: 12px; letter-spacing: .3em; color: var(--accent); margin-bottom: 5px; text-shadow: 0 0 10px rgba(255,92,58,.6); }
+    #bossbar .track { height: 12px; background: #1a1f28; border: 1px solid #3a2a2a; border-radius: 3px; overflow: hidden; box-shadow: 0 0 14px rgba(255,92,58,.25); }
+    #bossbar #bossFill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff3a3a, #ff8a3a); transition: width 120ms ease-out; }
+    @media (max-width: 520px) { #bossbar { top: calc(64px + var(--safe-t)); width: 80vw; } }
     #dashcd i { display: block; height: 100%; background: var(--accent2); width: 100%; }
 
     /* ---------- touch controls ---------- */
@@ -142,6 +147,7 @@
     <div id="perf"></div>
     <div class="bar"><div class="track"><div id="hpFill" class="fill"></div></div><div class="track" style="margin-top:4px;height:5px"><div id="shFill" class="fill shield" style="width:0%"></div></div><div class="label"><span id="hpText">100</span> HP</div></div>
     <div id="dashcd"><i id="dashFill"></i></div>
+    <div id="bossbar" class="hidden"><div id="bossName">THE CUSTODIAN</div><div class="track"><div id="bossFill"></div></div></div>
     <div id="ammo"><span id="ammoText">12</span><small id="weaponName">SIDEARM</small></div>
     <div id="toast"></div>
     <div id="touch">

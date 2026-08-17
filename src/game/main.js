@@ -36,7 +36,7 @@ function benchmark() {
 const isMobile = matchMedia("(pointer: coarse)").matches;
 const tierName = pickQualityTier(benchmark(), { mobile: isMobile, deviceMemory: navigator.deviceMemory });
 const R = createRenderer($("#app"), tierName);
-const { renderer, scene, camera } = R;
+const { renderer, scene, camera, render } = R;
 $("#perf").textContent = `${tierName.toUpperCase()} · ${isMobile ? "TOUCH" : "KBM"}`;
 
 const player = new Player(camera);
@@ -104,6 +104,7 @@ function enterRoom() {
   enemies.spawnRoom(seedRng.fork("enemies"), r.floor, r.roomIndex, G.arena, G.mods, room.eliteCount);
   hazards.spawn(seedRng.fork("hazards"), room.hazardTag, G.arena, r.floor);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
+  $("#bossbar").classList.add("hidden");
   G.roomTimer = G.mods.timePressure ? 60 : 0;
   G.shield = r.stats.roomShield ?? 0;
   scene.fog.density = G.mods.darkness ? 0.11 : 0.028;
@@ -134,6 +135,7 @@ function enterBoss() {
   if (b.id === "chorus") { for (const dx of [-5, 5]) { const m = scaleEnemy("sentinel", r.floor, 4, null); m.hp = Math.round(b.hp * 0.35); m.maxHp = m.hp; const e = enemies.spawn(m, dx, -9, true); e.mesh.scale.multiplyScalar(1.2); e.radius *= 1.2; e.isBossAdd = true; } }
   G.boss = boss; G.bossMode = true; G.roomActive = true; G.roomCleared = false; G.roomTimer = 0;
   $("#roomNum").textContent = "BOSS"; $("#modName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`;
+  $("#bossName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`; $("#bossFill").style.width = "100%"; $("#bossbar").classList.remove("hidden");
   toast(`${b.name} — ${b.affix}`, true, 2600); SFX.bossRoar();
   weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
 }
@@ -404,6 +406,7 @@ function frame(now) {
       if (d < 1.8) { G.roomCleared = false; if (G.bossMode) onBossDown(); else openDraft(); }
     }
     // hud
+    if (G.bossMode && G.boss) { $("#bossFill").style.width = `${Math.max(0, G.boss.hp / G.boss.maxHp) * 100}%`; if (!G.boss.alive) $("#bossbar").classList.add("hidden"); }
     $("#hpFill").style.width = `${Math.max(0, G.hp / G.run.maxHp) * 100}%`;
     $("#shFill").style.width = `${Math.min(100, (G.shield / Math.max(1, G.run.maxHp)) * 100)}%`;
     $("#hpText").textContent = Math.ceil(G.hp);
@@ -415,7 +418,7 @@ function frame(now) {
     // fps counter (dev)
     G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${tierName.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
   }
-  renderer.render(scene, camera);
+  render();
 }
 
 // -------------------------------------------------------------- menu wiring --
@@ -444,7 +447,7 @@ document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, {
 if (new URLSearchParams(location.search).has("dev")) {
   window.__hs = {
     G, enemies, player, fx, hazards, renderer, scene, camera, THREE,
-    snap() { renderer.render(scene, camera); return renderer.domElement.toDataURL("image/png"); },
+    snap() { render(); return renderer.domElement.toDataURL("image/png"); },
     clearRoom() { for (const e of enemies.list) if (e.alive) enemies._kill(e, null, true); if (G.bossMode) { G.roomActive = false; G.roomCleared = true; G.arena.exit.material.opacity = 0.75; } else onRoomCleared(); },
     toExit() { player.pos.x = G.arena.exitPos.x; player.pos.z = G.arena.exitPos.z; },
     god() { G.invuln = 1e9; },

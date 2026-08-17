@@ -22,6 +22,10 @@ describe("floor — content tables", () => {
     for (const b of Object.values(BOSSES)) {
       expect(typeof b.name).toBe("string");
       expect(typeof b.hp).toBe("number");
+      // A boss must survive ~25s+ of sidearm fire (~50 dps). 140 HP died in one
+      // burst in play-testing; the magnitude is part of the contract now.
+      expect(b.hp).toBeGreaterThanOrEqual(800);
+      expect(b.hp).toBeLessThanOrEqual(2500);
     }
   });
 });

@@ -34,7 +34,7 @@ export class FX {
         uniform float uScale;
         void main(){ vColor = color; vec4 mv = modelViewMatrix * vec4(position,1.0);
           // clamp: a spark 20cm from the lens must not become a dinner plate
-          gl_PointSize = min(psize * uScale / max(1.5, -mv.z), 42.0); gl_Position = projectionMatrix * mv; }`,
+          gl_PointSize = min(psize * uScale * 0.7 / max(1.8, -mv.z), 30.0); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `
         varying vec3 vColor;
         void main(){ vec2 c = gl_PointCoord - 0.5; float d = dot(c,c); if (d > 0.25) discard;

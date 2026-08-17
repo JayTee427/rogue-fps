@@ -3,6 +3,10 @@
 // phone, and (per DESIGN) legibility beats photoreal in an arcade shooter.
 
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { TIERS } from "core/quality.js";
 
 export const COLORS = {
@@ -72,14 +76,31 @@ export function createRenderer(container, tierName) {
   rim.position.set(0, 6, 0);
   scene.add(rim);
 
+  // Bloom is what makes emissive trims, muzzle flash, tracers and enemy glow read
+  // as light rather than as bright paint. It is the single biggest lever for a
+  // stylised look, and it is cheap enough for medium tier; low tier skips it.
+  let composer = null, bloom = null;
+  if (tier.bloom !== false && tierName !== "low") {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.6, 0.82);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    // the composer owns tone mapping now
+    renderer.toneMapping = THREE.NoToneMapping;
+  }
+
   const onResize = () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight, false);
+    composer?.setSize(window.innerWidth, window.innerHeight);
   };
   window.addEventListener("resize", onResize);
 
-  return { renderer, scene, camera, tier, dispose() { window.removeEventListener("resize", onResize); renderer.dispose(); } };
+  const render = () => { if (composer) composer.render(); else renderer.render(scene, camera); };
+
+  return { renderer, scene, camera, tier, composer, bloom, render, dispose() { window.removeEventListener("resize", onResize); renderer.dispose(); } };
 }
 
 const flat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });

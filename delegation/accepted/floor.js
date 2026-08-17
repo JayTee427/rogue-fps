@@ -11,9 +11,9 @@ export const ROOM_MODIFIERS = {
 export const HAZARD_TAGS = ["lava_floor", "turrets", "mines", "acid_pools", "collapsing"];
 
 export const BOSSES = {
-  custodian: { name: "Custodian", hp: 120 },
-  chorus: { name: "Chorus", hp: 100 },
-  landlord: { name: "Landlord", hp: 140 }
+  custodian: { name: "The Custodian", hp: 1200 },
+  chorus: { name: "Chorus", hp: 900 },
+  landlord: { name: "The Landlord", hp: 1500 }
 };
 
 const AFFIXES = ["armoured", "hasty", "regenerating", "explosive", "shielded"];

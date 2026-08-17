@@ -1,8 +1,8 @@
 export const PRESETS = {
-  hit: { count: 6, life: 0.35, speed: 5, size: 0.1, color: 0xffd080, gravity: 0, drag: 0, spread: 1 },
-  crit: { count: 14, life: 0.4, speed: 6, size: 0.12, color: 0xffff00, gravity: 0, drag: 0, spread: 1 },
-  kill: { count: 24, life: 0.5, speed: 7, size: 0.15, color: 0xff4040, gravity: 0, drag: 0, spread: 1 },
-  explosion: { count: 60, life: 0.6, speed: 10, size: 0.2, color: 0xff8020, gravity: 9.8, drag: 0.5, spread: 1 },
+  hit: { count: 5, life: 0.35, speed: 5, size: 0.045, color: 0xffd080, gravity: 0, drag: 0, spread: 1 },
+  crit: { count: 10, life: 0.4, speed: 6, size: 0.06, color: 0xffff00, gravity: 0, drag: 0, spread: 1 },
+  kill: { count: 24, life: 0.5, speed: 7, size: 0.075, color: 0xff4040, gravity: 0, drag: 0, spread: 1 },
+  explosion: { count: 60, life: 0.6, speed: 10, size: 0.11, color: 0xff8020, gravity: 9.8, drag: 0.5, spread: 1 },
   muzzle: { count: 5, life: 0.2, speed: 8, size: 0.08, color: 0xffd080, gravity: 0, drag: 0, spread: 1 },
   dash: { count: 12, life: 0.3, speed: 9, size: 0.1, color: 0x80ffff, gravity: 0, drag: 0, spread: 1 },
   pickup: { count: 20, life: 0.7, speed: 4, size: 0.1, color: 0x00ff00, gravity: 0, drag: 0, spread: 1 },

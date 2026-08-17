@@ -31,12 +31,14 @@ export class EnemyManager {
     scene.add(this.group);
     this._tmp = new THREE.Vector3();
     this.projectiles = [];   // enemy shots: { mesh, vel, dmg, ttl }
+    this.shards = [];        // death debris
   }
 
   clear() {
     for (const e of this.list) this.group.remove(e.mesh);
     for (const p of this.projectiles) this.group.remove(p.mesh);
-    this.list = []; this.projectiles = [];
+    for (const sh of this.shards) this.group.remove(sh.m);
+    this.list = []; this.projectiles = []; this.shards = [];
   }
 
   spawnRoom(rng, floor, roomIndex, arena, mods, eliteCount) {
@@ -87,6 +89,7 @@ export class EnemyManager {
   /** returns events: [{type:'hitPlayer', dmg}, {type:'kill', e}, {type:'popperBoom', pos, dmg}] */
   update(dt, player, arena, playerStats) {
     const events = [];
+    this._updateShards(dt);
     const pp = player.pos;
     for (const e of this.list) {
       if (!e.alive) continue;
@@ -223,6 +226,38 @@ export class EnemyManager {
     this.group.remove(e.mesh);
     if (!silent) SFX.kill();
     if (events) events.push({ type: "kill", e });
+    this._shatter(e);
+  }
+
+  /** Death: the mesh breaks into flying shards that tumble, fall, and fade.
+   *  Enemies that simply vanish read as a bug; this is the difference. */
+  _shatter(e) {
+    const src = e.mesh, look = LOOKS[e.archetype];
+    const n = e.isBoss ? 26 : 10;
+    const mat = new THREE.MeshLambertMaterial({ color: look.color, flatShading: true, emissive: new THREE.Color(look.glow), emissiveIntensity: 1.2, transparent: true });
+    const size = look.size * (src.scale.x || 1) * 0.35;
+    for (let i = 0; i < n; i++) {
+      const geo = new THREE.TetrahedronGeometry(size * (0.5 + Math.random() * 0.8), 0);
+      const m = new THREE.Mesh(geo, mat.clone());
+      m.position.copy(src.position).add(new THREE.Vector3((Math.random() - 0.5) * size * 2, (Math.random() - 0.5) * size * 2, (Math.random() - 0.5) * size * 2));
+      m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      this.group.add(m);
+      const vel = m.position.clone().sub(src.position).normalize().multiplyScalar(4 + Math.random() * 6); vel.y += 3 + Math.random() * 4;
+      this.shards.push({ m, vel, spin: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4), life: 0.9 + Math.random() * 0.5, max: 1.2 });
+    }
+  }
+
+  _updateShards(dt) {
+    for (let i = this.shards.length - 1; i >= 0; i--) {
+      const s = this.shards[i];
+      s.vel.y -= 22 * dt;
+      s.m.position.addScaledVector(s.vel, dt);
+      if (s.m.position.y < 0.05) { s.m.position.y = 0.05; s.vel.y = -s.vel.y * 0.35; s.vel.x *= 0.7; s.vel.z *= 0.7; }
+      s.m.rotation.x += s.spin.x * dt; s.m.rotation.y += s.spin.y * dt; s.m.rotation.z += s.spin.z * dt;
+      s.life -= dt;
+      s.m.material.opacity = Math.max(0, Math.min(1, s.life / 0.4));
+      if (s.life <= 0) { this.group.remove(s.m); s.m.geometry.dispose(); s.m.material.dispose(); this.shards.splice(i, 1); }
+    }
   }
 
   /** first alive enemy hit by a ray from origin along dir within maxDist; warden shields block from the front */
