@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0c10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>HOLLOW SIGNAL</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230a0c10'/><circle cx='50' cy='50' r='30' fill='none' stroke='%23ff5c3a' stroke-width='8'/><circle cx='50' cy='50' r='6' fill='%23ff5c3a'/></svg>" />
+  <style>
+    :root {
+      --bg: #0a0c10; --fg: #e8ecf1; --dim: #8b95a5; --accent: #ff5c3a; --accent2: #3ad1ff;
+      --hp: #ff4d6d; --shield: #4dd2ff; --gold: #ffd166; --rare: #b388ff; --legend: #ffb347; --cursed: #d63aff;
+      --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+      --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+      font-family: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; overscroll-behavior: none; touch-action: none; user-select: none; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* ---------- overlay layers ---------- */
+    .layer { position: absolute; inset: 0; pointer-events: none; }
+    .layer > * { pointer-events: auto; }
+    .hidden { display: none !important; }
+
+    /* ---------- HUD ---------- */
+    #hud { padding: calc(12px + var(--safe-t)) calc(14px + var(--safe-r)) calc(12px + var(--safe-b)) calc(14px + var(--safe-l)); }
+    .bar { position: absolute; left: calc(14px + var(--safe-l)); bottom: calc(14px + var(--safe-b)); width: min(38vw, 260px); }
+    .bar .track { height: 10px; background: #1a1f28; border: 1px solid #2a3140; border-radius: 3px; overflow: hidden; }
+    .bar .fill { height: 100%; background: var(--hp); transition: width 80ms linear; }
+    .bar .fill.shield { background: var(--shield); }
+    .bar .label { font-size: 12px; color: var(--dim); margin-top: 4px; letter-spacing: .08em; }
+    #ammo { position: absolute; right: calc(14px + var(--safe-r)); bottom: calc(14px + var(--safe-b)); text-align: right; font-size: 28px; font-weight: 700; letter-spacing: .04em; text-shadow: 0 0 12px rgba(0,0,0,.8); }
+    #ammo small { display: block; font-size: 11px; color: var(--dim); font-weight: 400; letter-spacing: .1em; }
+    #ammo.reloading { color: var(--accent2); }
+    #floor { position: absolute; top: calc(12px + var(--safe-t)); left: 50%; transform: translateX(-50%); font-size: 12px; letter-spacing: .18em; color: var(--dim); text-align: center; white-space: nowrap; }
+    #floor b { color: var(--fg); }
+    #items { position: absolute; top: calc(12px + var(--safe-t)); left: calc(14px + var(--safe-l)); display: flex; flex-wrap: wrap; gap: 4px; max-width: 42vw; }
+    #items span { font-size: 10px; padding: 3px 6px; border: 1px solid #2a3140; border-radius: 3px; background: rgba(10,12,16,.7); color: var(--dim); }
+    #items span.rare { border-color: var(--rare); color: var(--rare); }
+    #items span.legendary { border-color: var(--legend); color: var(--legend); }
+    #items span.cursed { border-color: var(--cursed); color: var(--cursed); }
+    #items span.uncommon { color: var(--fg); }
+    #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%,-50%); }
+    #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,.9); }
+    #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+    #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+    #crosshair.hit { filter: drop-shadow(0 0 6px var(--accent)); }
+    #dmgflash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(255,60,60,.55) 100%); opacity: 0; transition: opacity 120ms; }
+    #dmgflash.on { opacity: 1; }
+    #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 15px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg); text-shadow: 0 0 10px rgba(0,0,0,.9); opacity: 0; transition: opacity 200ms; text-align: center; padding: 0 12px; }
+    #toast.on { opacity: 1; }
+    #toast.warn { color: var(--accent); }
+    #dashcd { position: absolute; left: 50%; bottom: calc(60px + var(--safe-b)); transform: translateX(-50%); width: 60px; height: 4px; background: #1a1f28; border-radius: 2px; overflow: hidden; }
+    #dashcd i { display: block; height: 100%; background: var(--accent2); width: 100%; }
+
+    /* ---------- touch controls ---------- */
+    #touch { display: none; }
+    body.touch #touch { display: block; }
+    #joy { position: absolute; left: calc(28px + var(--safe-l)); bottom: calc(48px + var(--safe-b)); width: 128px; height: 128px; border-radius: 50%; border: 2px solid rgba(255,255,255,.18); background: rgba(255,255,255,.04); }
+    #joy i { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(255,255,255,.28); }
+    .tbtn { position: absolute; width: 64px; height: 64px; border-radius: 50%; border: 2px solid rgba(255,255,255,.22); background: rgba(255,255,255,.06); color: var(--fg); font: 700 11px/1 inherit; letter-spacing: .1em; display: flex; align-items: center; justify-content: center; }
+    .tbtn:active { background: rgba(255,92,58,.35); border-color: var(--accent); }
+    #btnFire  { right: calc(28px + var(--safe-r)); bottom: calc(48px + var(--safe-b)); width: 84px; height: 84px; }
+    #btnDash  { right: calc(126px + var(--safe-r)); bottom: calc(40px + var(--safe-b)); }
+    #btnJump  { right: calc(40px + var(--safe-r)); bottom: calc(148px + var(--safe-b)); }
+    #btnReload{ right: calc(126px + var(--safe-r)); bottom: calc(118px + var(--safe-b)); width: 52px; height: 52px; font-size: 10px; }
+    body.touch #ammo { bottom: calc(240px + var(--safe-b)); }
+    body.touch .bar { bottom: calc(190px + var(--safe-b)); }
+
+    /* ---------- screens ---------- */
+    .screen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; background: rgba(6,8,12,.86); backdrop-filter: blur(6px); text-align: center; }
+    .screen h1 { margin: 0; font-size: clamp(30px, 8vw, 64px); letter-spacing: .22em; font-weight: 800; }
+    .screen h1 span { color: var(--accent); }
+    .screen p { margin: 0; color: var(--dim); max-width: 520px; line-height: 1.5; font-size: 14px; }
+    .screen .sub { font-size: 12px; letter-spacing: .14em; color: var(--dim); text-transform: uppercase; }
+    button.big { font: inherit; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; padding: 16px 30px; border-radius: 6px; border: 2px solid var(--accent); background: transparent; color: var(--fg); cursor: pointer; min-width: 240px; }
+    button.big:hover, button.big:active { background: var(--accent); color: #0a0c10; }
+    button.big.ghost { border-color: #2a3140; }
+    button.big.ghost:hover { background: #2a3140; color: var(--fg); }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    input.seed { font: inherit; font-size: 14px; letter-spacing: .14em; text-transform: uppercase; padding: 12px; width: 180px; text-align: center; background: #0f1218; border: 1px solid #2a3140; color: var(--fg); border-radius: 6px; }
+    label.chk { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; cursor: pointer; }
+
+    /* draft */
+    #draft .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+    .card { width: min(240px, 80vw); border: 2px solid #2a3140; border-radius: 10px; padding: 16px; background: #0f1218; text-align: left; cursor: pointer; transition: transform 80ms, border-color 80ms; }
+    .card:hover, .card:active { transform: translateY(-3px); border-color: var(--fg); }
+    .card .rar { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; }
+    .card h3 { margin: 6px 0 8px; font-size: 18px; letter-spacing: .04em; }
+    .card p { font-size: 13px; color: var(--dim); line-height: 1.45; }
+    .card.common .rar { color: var(--dim); } .card.uncommon .rar { color: var(--fg); }
+    .card.rare { border-color: var(--rare); } .card.rare .rar { color: var(--rare); }
+    .card.legendary { border-color: var(--legend); box-shadow: 0 0 24px rgba(255,179,71,.25); } .card.legendary .rar { color: var(--legend); }
+    .card.cursed { border-color: var(--cursed); } .card.cursed .rar { color: var(--cursed); }
+    .card .stack { font-size: 10px; color: var(--accent2); letter-spacing: .1em; }
+
+    /* doors */
+    #doors .cards .card { text-align: center; }
+    #doors .card .tag { display: inline-block; margin: 3px; font-size: 10px; padding: 3px 7px; border: 1px solid #2a3140; border-radius: 3px; color: var(--dim); }
+    #doors .card .tag.elite { border-color: var(--accent); color: var(--accent); }
+
+    /* report */
+    #report .stats { display: grid; grid-template-columns: auto auto; gap: 6px 22px; font-size: 14px; text-align: left; }
+    #report .stats b { color: var(--gold); text-align: right; }
+    #report .bonus { color: var(--accent2); font-size: 12px; letter-spacing: .1em; }
+    #report .big-score { font-size: clamp(36px, 10vw, 72px); font-weight: 800; color: var(--gold); letter-spacing: .06em; }
+
+    #boot { font-size: 12px; letter-spacing: .2em; color: var(--dim); }
+    #boot .spin { width: 28px; height: 28px; border: 3px solid #2a3140; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #perf { position: absolute; top: calc(12px + var(--safe-t)); right: calc(14px + var(--safe-r)); font-size: 10px; color: var(--dim); letter-spacing: .1em; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- in-game HUD -->
+  <div id="hud" class="layer hidden">
+    <div id="crosshair"></div>
+    <div id="dmgflash"></div>
+    <div id="floor"><b id="floorNum">FLOOR 1</b> · <span id="roomNum">ROOM 1/5</span> · <span id="modName"></span></div>
+    <div id="items"></div>
+    <div id="perf"></div>
+    <div class="bar"><div class="track"><div id="hpFill" class="fill"></div></div><div class="track" style="margin-top:4px;height:5px"><div id="shFill" class="fill shield" style="width:0%"></div></div><div class="label"><span id="hpText">100</span> HP</div></div>
+    <div id="dashcd"><i id="dashFill"></i></div>
+    <div id="ammo"><span id="ammoText">12</span><small id="weaponName">SIDEARM</small></div>
+    <div id="toast"></div>
+    <div id="touch">
+      <div id="joy"><i></i></div>
+      <div id="btnFire" class="tbtn">FIRE</div>
+      <div id="btnDash" class="tbtn">DASH</div>
+      <div id="btnJump" class="tbtn">JUMP</div>
+      <div id="btnReload" class="tbtn">RLD</div>
+    </div>
+  </div>
+
+  <!-- boot -->
+  <div id="boot" class="layer screen"><div class="spin"></div><div>CALIBRATING</div></div>
+
+  <!-- title / menu -->
+  <div id="menu" class="layer screen hidden">
+    <div class="sub">a roguelike first-person shooter</div>
+    <h1>HOLLOW<span>·</span>SIGNAL</h1>
+    <p>You are a salvage drone dropped into a derelict station whose rooms rearrange between visits. Fight through it with a gun that changes every time you find something. Extract, or go deeper.</p>
+    <div class="row">
+      <button class="big" id="btnRun">New Run</button>
+      <button class="big ghost" id="btnDaily">Daily Seed</button>
+    </div>
+    <div class="row">
+      <input class="seed" id="seedInput" placeholder="SEED (optional)" maxlength="10" />
+      <label class="chk"><input type="checkbox" id="chkCurses" /> allow cursed items</label>
+    </div>
+    <div class="sub" id="menuHint">WASD · mouse · shift dash · space jump · R reload · click to lock</div>
+    <div class="sub" id="bestLine"></div>
+  </div>
+
+  <!-- reward draft -->
+  <div id="draft" class="layer screen hidden">
+    <div class="sub">room clear · choose one</div>
+    <div class="cards" id="draftCards"></div>
+    <div class="row"><button class="big ghost" id="btnSkip">Take nothing</button><button class="big ghost hidden" id="btnReroll">Reroll</button></div>
+  </div>
+
+  <!-- door choice -->
+  <div id="doors" class="layer screen hidden">
+    <div class="sub">choose a door</div>
+    <div class="cards" id="doorCards"></div>
+  </div>
+
+  <!-- floor start / extract -->
+  <div id="floorStart" class="layer screen hidden">
+    <h1 id="fsTitle">FLOOR 2</h1>
+    <p id="fsText"></p>
+    <div class="row">
+      <button class="big" id="btnDeeper">Go Deeper</button>
+      <button class="big ghost" id="btnExtract">Extract &amp; Bank</button>
+    </div>
+  </div>
+
+  <!-- death / extract report -->
+  <div id="report" class="layer screen hidden">
+    <div class="sub" id="repSub">run over</div>
+    <h1 id="repTitle">DEAD</h1>
+    <div class="big-score" id="repScore">0</div>
+    <div class="stats" id="repStats"></div>
+    <div class="bonus" id="repBonus"></div>
+    <div class="row"><button class="big" id="btnAgain">Run Again</button><button class="big ghost" id="btnMenu">Menu</button></div>
+    <div class="sub" id="repSeed"></div>
+  </div>
+
+  <script type="module" src="/src/game/main.js"></script>
+</body>
+</html>
