@@ -6,3 +6,6 @@ delegation/out/
 delegation/.scratch/
 .vercel
 .vercel/
+
+# Laguna delegation harness and specs - kept local
+delegation/

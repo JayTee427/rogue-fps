@@ -6,7 +6,9 @@ You are a salvage drone dropped into a derelict station whose rooms rearrange
 between visits. Fight through it with a gun that changes every time you find
 something. Extract, or go deeper.
 
-**Play:** `npm run dev` → http://localhost:5173. Desktop: WASD, mouse, Shift dash,
+**Play it now:** https://rogue-fps-six.vercel.app
+
+**Run it locally:** `npm run dev` → http://localhost:5173. Desktop: WASD, mouse, Shift dash,
 Space jump, R reload, click to lock. Phone: left thumb moves, right thumb looks,
 buttons for fire / dash / jump / reload, with soft aim assist.
 
