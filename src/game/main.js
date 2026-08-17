@@ -19,6 +19,10 @@ import { Input } from "./input.js";
 import { WeaponView } from "./weaponView.js";
 import { EnemyManager } from "./enemies.js";
 import { initAudio, resumeAudio, SFX } from "./audio.js";
+import { FX } from "./fx.js";
+import { HazardView } from "./hazardView.js";
+import { TIERS } from "core/quality.js";
+import { chainTargets, singularityPull, explosionVictims } from "core/fxitems.js";
 
 // ------------------------------------------------------------------ boot --
 const $ = (s) => document.querySelector(s);
@@ -39,6 +43,8 @@ const player = new Player(camera);
 const input = new Input(renderer.domElement, $("#hud"));
 const weaponView = new WeaponView(camera, scene);
 const enemies = new EnemyManager(scene);
+const fx = new FX(scene, camera, TIERS[tierName]);
+const hazards = new HazardView(scene);
 
 // ------------------------------------------------------------------ state --
 const G = {
@@ -95,6 +101,7 @@ function enterRoom() {
   applyStats();
   enemies.clear();
   enemies.spawnRoom(seedRng.fork("enemies"), r.floor, r.roomIndex, G.arena, G.mods, room.eliteCount);
+  hazards.spawn(seedRng.fork("hazards"), room.hazardTag, G.arena, r.floor);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
   G.roomTimer = G.mods.timePressure ? 60 : 0;
   G.shield = r.stats.roomShield ?? 0;
@@ -116,7 +123,7 @@ function enterBoss() {
   G.arena?.dispose();
   G.arena = buildArena(scene, seedRng.fork("arena"), { blockCount: 4, halfW: 18, halfD: 18 });
   player.arena = G.arena; player.reset(0, 14); player.yaw = 0; player.pitch = 0;
-  enemies.clear();
+  enemies.clear(); hazards.clear();
   // boss = a big elite of a fitting archetype with the floor's affix, hp from floor data
   const arch = { custodian: "warden", chorus: "sentinel", landlord: "brute" }[b.id] ?? "brute";
   const data = scaleEnemy(arch, r.floor, 4, b.affix);
@@ -227,7 +234,8 @@ function damagePlayer(amount, why = "?") {
   const still = Math.hypot(player.vel.x, player.vel.z) < 0.5;
   if (still && s.stillDamageTaken) amount *= s.stillDamageTaken;
   if (G.shield > 0) { const a = Math.min(G.shield, amount); G.shield -= a; amount -= a; }
-  G.hp -= amount; G.invuln = 0.35; G.dmgFlash = 1; G.kickX += (Math.random() - 0.5) * 0.06; G.kickY += 0.04;
+  G.hp -= amount; G.invuln = 0.35; G.dmgFlash = 1;
+  fx.trauma(Math.min(0.6, 0.15 + amount / 60));
   SFX.hurt();
   if (s.bulletTime && G.hp > 0 && G.hp / G.run.maxHp < 0.3 && (G.btCd ?? 0) <= 0) { G.timeScale = 0.6; G.btT = 1; G.btCd = 20; }
   if (G.hp <= 0) {
@@ -241,7 +249,7 @@ function damagePlayer(amount, why = "?") {
   }
 }
 
-function heal(n) { if (n <= 0 || G.run.stats.noHeal) return; G.hp = Math.min(G.run.maxHp, G.hp + n); }
+function heal(n) { if (n <= 0 || G.run.stats.noHeal) return; const before = G.hp; G.hp = Math.min(G.run.maxHp, G.hp + n); if (G.hp - before >= 1) fx.number(G.hp - before, { x: player.pos.x, y: player.pos.y - 0.2, z: player.pos.z }, "heal", "selfheal"); }
 
 // -------------------------------------------------------------- shooting --
 const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _end = new THREE.Vector3();
@@ -256,6 +264,7 @@ function fire(want, dt) {
   }
   const shot = weaponView.tryFire(want, dt, s, G.roomRng, dir);
   if (!shot) return;
+  if (!shot.beam) { const a = weaponView.archetype; fx.muzzleFlash(a === "railgun" ? 2 : a === "scattergun" ? 1.4 : 1); fx.trauma(a === "railgun" ? 0.25 : a === "scattergun" ? 0.14 : 0.05); }
   const origin = _o.copy(player.pos);
   const pierce = (s.pierce ?? 0) + (r.weapon.stats.pierce ?? 0);
   let anyHit = false;
@@ -273,7 +282,27 @@ function fire(want, dt) {
       h.e.statuses = res.statusesAfter;
       const killed = enemies.damage(h.e, res.damage, res.hpAfter, res.killed);
       anyHit = true;
-      if (res.crit) { SFX.crit(); G.hitstop = Math.max(G.hitstop, 0.045); } else SFX.hit();
+      const hitPos = origin.clone().addScaledVector(ray.dir, h.t);
+      fx.hit(hitPos, ray.dir, res.crit);
+      fx.number(res.damage, h.e.mesh.position, res.crit ? "crit" : "hit", h.e.mesh.uuid);
+      if (res.crit) { SFX.crit(); G.hitstop = Math.max(G.hitstop, 0.045); fx.trauma(0.08); } else SFX.hit();
+      // Static Charge / Arc mod: every Nth hit chains lightning through nearby enemies
+      if (s.chainEveryN > 0) {
+        G.hitCount = (G.hitCount ?? 0) + 1;
+        if (G.hitCount % Math.round(s.chainEveryN) === 0) {
+          const pool = enemies.list.filter(e => e.alive).map(e => ({ id: e.mesh.uuid, x: e.mesh.position.x, y: e.mesh.position.y, z: e.mesh.position.z, ref: e }));
+          let from = h.e.mesh.position;
+          for (const l of chainTargets(pool, h.e.mesh.uuid, 3, 8)) {
+            weaponView.spawnTracer(from.clone(), l.ref.mesh.position.clone(), 0x9ad8ff, 0.05, 0.14);
+            const dmg = combined.damage * 0.5, hp = Math.max(0, l.ref.hp - dmg);
+            fx.hit(l.ref.mesh.position, ray.dir, false); fx.number(dmg, l.ref.mesh.position, "hit", l.ref.mesh.uuid);
+            if (enemies.damage(l.ref, dmg, hp, hp <= 0)) onKill(l.ref, { damage: dmg });
+            from = l.ref.mesh.position;
+          }
+        }
+      }
+      // Singularity Rounds: every Nth shot opens a pull at the impact point
+      if (s.blackHoleEveryN > 0 && !G.singularity && weaponView.shotIndex % Math.round(s.blackHoleEveryN) === 0) { G.singularity = { pos: hitPos.clone(), t: 2 }; fx.explosion(hitPos, 1); }
       heal(res.heal);
       if (killed) onKill(h.e, res);
     }
@@ -284,6 +313,7 @@ function fire(want, dt) {
 function onKill(e, res) {
   const s = G.run.stats;
   G.killsThisRoom++;
+  fx.kill(e.mesh.position); fx.trauma(0.12);
   heal(s.healOnKill ?? 0);
   if (s.dashOnKill) player.dashCd = 0;
   if (s.onKillExplode > 0) explode(e.mesh.position, 2.5, res.damage * s.onKillExplode);
@@ -297,10 +327,12 @@ function onKill(e, res) {
 }
 
 function explode(pos, radius, dmg) {
-  for (const e of enemies.list) {
-    if (!e.alive) continue;
-    const d = e.mesh.position.distanceTo(pos);
-    if (d < radius) { const hp = Math.max(0, e.hp - dmg); const killed = enemies.damage(e, dmg, hp, hp <= 0); if (killed) onKill(e, { damage: dmg }); }
+  fx.explosion(pos, radius);
+  const pool = enemies.list.filter(e => e.alive).map(e => ({ id: e.mesh.uuid, x: e.mesh.position.x, y: e.mesh.position.y, z: e.mesh.position.z, ref: e }));
+  for (const v of explosionVictims({ x: pos.x, y: pos.y, z: pos.z }, radius, pool)) {
+    const e = v.ref, d = dmg * v.falloff, hp = Math.max(0, e.hp - d);
+    fx.number(d, e.mesh.position, "hit", e.mesh.uuid);
+    if (enemies.damage(e, d, hp, hp <= 0)) onKill(e, { damage: d });
   }
 }
 
@@ -318,12 +350,11 @@ function frame(now) {
     const sens = input.isTouch ? input.mouseSens : input.mouseSens;
     if (input.locked || input.isTouch) player.look(look.dx, look.dy, sens);
     player.update(dt, s);
-    if (player.dashed) SFX.dash(); if (player.jumped) SFX.jump();
+    if (player.dashed) { SFX.dash(); fx.dash(new THREE.Vector3(player.pos.x, 0.6, player.pos.z)); } if (player.jumped) SFX.jump();
     if (s.reload) weaponView.startReload(G.run.stats);
     weaponView.update(dt, Math.hypot(player.vel.x, player.vel.z) > 1);
-    // camera kick
-    camera.rotation.x += G.kickY; camera.rotation.z += G.kickX;
-    G.kickX *= 0.85; G.kickY *= 0.85;
+    // remember the un-shaken camera pose; fx.update applies shake on top of it
+    G.camBase = { x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z };
 
     if (G.roomActive || G.bossMode) {
       const s2 = { ...G.run.stats, ...G.run.weapon.stats };
@@ -335,12 +366,31 @@ function frame(now) {
         else if (ev.type === "kill") { if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive) onRoomCleared(); }
       }
       if (G.mods.timePressure && G.roomActive) { G.roomTimer -= dt; if (G.roomTimer <= 0) { damagePlayer(9999, "timer"); } }
+      // hazards (turrets, mines, lava, acid, collapsing) — logic in core, drawn by hazardView
+      let slowed = false;
+      for (const ev of hazards.update(dt, player, G.arena, G.roomRng)) {
+        if (ev.type === "damage") {
+          if (ev.instant) damagePlayer(ev.amount, "hazard:" + ev.source);
+          else { G.hazardAcc = (G.hazardAcc ?? 0) + ev.amount; if (G.hazardAcc >= 4) { const a = G.hazardAcc; G.hazardAcc = 0; G.invuln = 0; damagePlayer(a, "hazard:" + ev.source); } }
+          if (Math.random() < dt * 10) fx.burn(new THREE.Vector3(player.pos.x, 0.25, player.pos.z));
+        } else if (ev.type === "slow") { player.speedMult = Math.min(player.speedMult, 1 - ev.amount); slowed = true; }
+        else if (ev.type === "explode") { const d = Math.hypot(player.pos.x - ev.x, player.pos.z - ev.z); if (d < ev.radius) damagePlayer(ev.damage * (1 - d / ev.radius), "mine"); explode(new THREE.Vector3(ev.x, 0.5, ev.z), ev.radius, ev.damage * 0.6); }
+      }
+      if (!slowed) player.speedMult = Math.min(1, player.speedMult + dt * 2);
+      // singularity: pull enemies toward the point for its lifetime
+      if (G.singularity) {
+        G.singularity.t -= dt;
+        for (const e of enemies.list) { if (!e.alive) continue; const d = singularityPull(G.singularity.pos, e.mesh.position, 6, 14, dt); e.mesh.position.x += d.x; e.mesh.position.z += d.z; }
+        if (Math.random() < dt * 30) fx.burst("dash", G.singularity.pos);
+        if (G.singularity.t <= 0) G.singularity = null;
+      }
       // regen out of combat-ish
       if (G.run.stats.regen > 0 && G.invuln <= 0) heal(G.run.stats.regen * dt);
       if (G.shield > 0) G.shield = Math.max(0, G.shield - dt * 2);
     }
     G.invuln = Math.max(0, G.invuln - dt);
     G.dmgFlash = Math.max(0, G.dmgFlash - dt * 3);
+    fx.update(dt, G.camBase ?? { x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z });
 
     // exit pad
     if (G.roomCleared && G.arena) {
@@ -388,7 +438,8 @@ document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, {
 // console for verification without touching gameplay code paths.
 if (new URLSearchParams(location.search).has("dev")) {
   window.__hs = {
-    G, enemies, player,
+    G, enemies, player, fx, hazards, renderer, scene, camera, THREE,
+    snap() { renderer.render(scene, camera); return renderer.domElement.toDataURL("image/png"); },
     clearRoom() { for (const e of enemies.list) if (e.alive) enemies._kill(e, null, true); if (G.bossMode) { G.roomActive = false; G.roomCleared = true; G.arena.exit.material.opacity = 0.75; } else onRoomCleared(); },
     toExit() { player.pos.x = G.arena.exitPos.x; player.pos.z = G.arena.exitPos.z; },
     god() { G.invuln = 1e9; },
