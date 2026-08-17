@@ -113,6 +113,14 @@
     #boot .spin { width: 28px; height: 28px; border: 3px solid #2a3140; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     #perf { position: absolute; top: calc(12px + var(--safe-t)); right: calc(14px + var(--safe-r)); font-size: 10px; color: var(--dim); letter-spacing: .1em; }
+    /* narrow screens: the floor label and perf tag collide at the top — stack them */
+    @media (max-width: 520px) {
+      #floor { top: calc(30px + var(--safe-t)); font-size: 11px; }
+      #items { top: calc(50px + var(--safe-t)); max-width: 60vw; }
+      #perf { font-size: 9px; }
+      .screen h1 { letter-spacing: .12em; }
+      .card { width: min(240px, 86vw); }
+    }
   </style>
 </head>
 <body>

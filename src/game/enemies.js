@@ -11,13 +11,16 @@ import { SFX } from "./audio.js";
 const flat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 const EYE = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
 
+// Bright, saturated, and each archetype its own hue — enemies must read
+// instantly against a dark station. `glow` is a constant emissive so they never
+// disappear in shadow or fog.
 const LOOKS = {
-  skitter:  { color: 0x9a3a2a, size: 0.55, y: 0.35, geo: () => new THREE.IcosahedronGeometry(0.4, 0) },
-  sentinel: { color: 0x3a6a9a, size: 1.0,  y: 1.1,  geo: () => new THREE.CylinderGeometry(0.35, 0.5, 2.0, 6) },
-  brute:    { color: 0x6a4a3a, size: 1.6,  y: 1.3,  geo: () => new THREE.BoxGeometry(1.7, 2.4, 1.4) },
-  popper:   { color: 0xffb03a, size: 0.6,  y: 0.5,  geo: () => new THREE.SphereGeometry(0.5, 8, 6) },
-  warden:   { color: 0x4a5a7a, size: 1.2,  y: 1.2,  geo: () => new THREE.CylinderGeometry(0.6, 0.6, 2.2, 8) },
-  wisp:     { color: 0xb08aff, size: 0.5,  y: 2.6,  geo: () => new THREE.OctahedronGeometry(0.45, 0) },
+  skitter:  { color: 0xff5a3a, glow: 0x5a1a0a, size: 0.55, y: 0.35, geo: () => new THREE.IcosahedronGeometry(0.4, 0) },
+  sentinel: { color: 0x4fa3ff, glow: 0x0f2a5a, size: 1.0,  y: 1.1,  geo: () => new THREE.CylinderGeometry(0.35, 0.5, 2.0, 6) },
+  brute:    { color: 0xd8873a, glow: 0x4a2a0a, size: 1.6,  y: 1.3,  geo: () => new THREE.BoxGeometry(1.7, 2.4, 1.4) },
+  popper:   { color: 0xffd23a, glow: 0x6a5a0a, size: 0.6,  y: 0.5,  geo: () => new THREE.SphereGeometry(0.5, 8, 6) },
+  warden:   { color: 0x8aa8d8, glow: 0x1a2a4a, size: 1.2,  y: 1.2,  geo: () => new THREE.CylinderGeometry(0.6, 0.6, 2.2, 8) },
+  wisp:     { color: 0xd08aff, glow: 0x4a1a6a, size: 0.5,  y: 2.6,  geo: () => new THREE.OctahedronGeometry(0.45, 0) },
 };
 
 export class EnemyManager {
@@ -54,7 +57,7 @@ export class EnemyManager {
 
   spawn(data, x, z, elite = false) {
     const look = LOOKS[data.archetype];
-    const mat = flat(look.color, elite ? { emissive: new THREE.Color(0x662200), emissiveIntensity: 0.9 } : {});
+    const mat = flat(look.color, { emissive: new THREE.Color(elite ? 0x883300 : look.glow), emissiveIntensity: elite ? 1.0 : 0.7 });
     const mesh = new THREE.Mesh(look.geo(), mat);
     mesh.position.set(x, look.y, z);
     mesh.castShadow = true;
@@ -95,7 +98,7 @@ export class EnemyManager {
         if (r.killed) { this._kill(e, events); continue; }
       } else e.slowMult = 1;
       if (e.regen) { e.regenT += dt; if (e.regenT > 1) { e.regenT = 0; e.hp = Math.min(e.maxHp, e.hp + e.regen); } }
-      if (e.hitFlash > 0) { e.hitFlash -= dt; e.mesh.material.emissiveIntensity = e.elite ? 0.9 : 0; if (e.hitFlash <= 0 && !e.elite) e.mesh.material.emissive.setHex(0); }
+      if (e.hitFlash > 0) { e.hitFlash -= dt; if (e.hitFlash <= 0) this._restoreGlow(e); }
 
       const m = e.mesh;
       const dx = pp.x - m.position.x, dz = pp.z - m.position.z;
@@ -118,21 +121,21 @@ export class EnemyManager {
           if (e.state === "seek" && e.cd <= 0) { e.state = "aim"; e.stateT = 0; }
           if (e.state === "aim") {
             m.material.emissive.setHex(0xff2020); m.material.emissiveIntensity = Math.min(1.2, e.stateT * 2);   // the laser-sight tell
-            if (e.stateT > 0.75) { e.state = "seek"; e.cd = 2.2 + Math.random(); m.material.emissiveIntensity = 0; this._shoot(e, pp, 26, e.damage); }
+            if (e.stateT > 0.75) { e.state = "seek"; e.cd = 2.2 + Math.random(); this._restoreGlow(e); this._shoot(e, pp, 26, e.damage); }
           }
           break;
         }
         case "brute": {                                              // roar, glow, then charge
           if (e.state === "seek") { this._move(e, nx * spd, nz * spd, dt, arena); if (dist < 9 && e.cd <= 0) { e.state = "windup"; e.stateT = 0; SFX.bossRoar(); } }
           else if (e.state === "windup") { m.material.emissive.setHex(0xff5522); m.material.emissiveIntensity = e.stateT * 2; m.scale.setScalar((e.elite ? 1.25 : 1) * (1 + Math.sin(e.stateT * 20) * 0.04)); if (e.stateT > 0.7) { e.state = "charge"; e.stateT = 0; e.chargeDir = { x: nx, z: nz }; } }
-          else if (e.state === "charge") { this._move(e, e.chargeDir.x * spd * 4.5, e.chargeDir.z * spd * 4.5, dt, arena); if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.5; } if (e.stateT > 0.6) { e.state = "seek"; e.cd = 2.5; m.material.emissiveIntensity = e.elite ? 0.9 : 0; m.scale.setScalar(e.elite ? 1.25 : 1); } }
+          else if (e.state === "charge") { this._move(e, e.chargeDir.x * spd * 4.5, e.chargeDir.z * spd * 4.5, dt, arena); if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.5; } if (e.stateT > 0.6) { e.state = "seek"; e.cd = 2.5; this._restoreGlow(e); m.scale.setScalar(e.elite ? 1.25 : 1); } }
           m.lookAt(pp.x, m.position.y, pp.z);
           break;
         }
         case "popper": {                                             // run at you, beep faster, explode
           this._move(e, nx * spd * (1 + Math.min(1, e.t * 0.1)), nz * spd, dt, arena);
           const rate = Math.max(0.12, Math.min(1, dist / 12));
-          e.beepT += dt; if (e.beepT > rate) { e.beepT = 0; SFX.popperBeep(1 - rate); m.material.emissive.setHex(0xffaa00); m.material.emissiveIntensity = 1.5; } else m.material.emissiveIntensity *= 0.85;
+          e.beepT += dt; if (e.beepT > rate) { e.beepT = 0; SFX.popperBeep(1 - rate); m.material.emissive.setHex(0xffaa00); m.material.emissiveIntensity = 1.5; } else m.material.emissiveIntensity = Math.max(0.7, m.material.emissiveIntensity * 0.85);
           if (dist < 1.6) { events.push({ type: "popperBoom", pos: m.position.clone(), dmg: e.damage, r: 3 }); this._kill(e, events, true); }
           break;
         }
@@ -203,6 +206,12 @@ export class EnemyManager {
     e.mesh.material.emissive.setHex(0xffffff); e.mesh.material.emissiveIntensity = 0.8;
     if (killed) this._kill(e, null);
     return killed;
+  }
+
+  _restoreGlow(e) {
+    const look = LOOKS[e.archetype];
+    e.mesh.material.emissive.setHex(e.elite ? 0x883300 : look.glow);
+    e.mesh.material.emissiveIntensity = e.elite ? 1.0 : 0.7;
   }
 
   _kill(e, events, silent = false) {

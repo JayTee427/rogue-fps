@@ -384,6 +384,17 @@ document.addEventListener("keydown", (e) => { if (e.code === "Escape" && G.run &
 document.addEventListener("click", () => resumeAudio(), { once: true });
 document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, { once: true });
 
+// dev hooks — only when ?dev is in the URL. Lets the loop be driven from the
+// console for verification without touching gameplay code paths.
+if (new URLSearchParams(location.search).has("dev")) {
+  window.__hs = {
+    G, enemies, player,
+    clearRoom() { for (const e of enemies.list) if (e.alive) enemies._kill(e, null, true); if (G.bossMode) { G.roomActive = false; G.roomCleared = true; G.arena.exit.material.opacity = 0.75; } else onRoomCleared(); },
+    toExit() { player.pos.x = G.arena.exitPos.x; player.pos.z = G.arena.exitPos.z; },
+    god() { G.invuln = 1e9; },
+  };
+}
+
 // go
 $("#boot").classList.add("hidden");
 menu();

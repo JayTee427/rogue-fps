@@ -21,7 +21,12 @@ export class Input {
     if (this.isTouch) this._bindTouch(hud);
   }
 
-  requestLock() { if (!this.isTouch && !this.locked) this.canvas.requestPointerLock?.(); }
+  requestLock() {
+    if (this.isTouch || this.locked) return;
+    // Wrapped: in iframes and some emulated environments the request throws or
+    // rejects asynchronously; neither should ever surface as an error.
+    try { const p = this.canvas.requestPointerLock?.(); if (p && p.catch) p.catch(() => {}); } catch { /* unavailable */ }
+  }
   releaseLock() { if (this.locked) document.exitPointerLock?.(); }
 
   _bindKeyboard() {

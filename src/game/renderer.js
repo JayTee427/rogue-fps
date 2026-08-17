@@ -24,14 +24,16 @@ export function createRenderer(container, tierName) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(COLORS.skyTop);
-  scene.fog = new THREE.FogExp2(0x0d1119, 0.028);
+  scene.background = new THREE.Color(0x0e1219);
+  // Fog kept light: it sells depth, but too much and enemies vanish into the
+  // dark — and "you always know why you died" is a design promise.
+  scene.fog = new THREE.FogExp2(0x0e1219, 0.016);
 
   const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.05, 200);
 
-  const hemi = new THREE.HemisphereLight(0x8fb4ff, 0x1a1408, 0.9);
+  const hemi = new THREE.HemisphereLight(0xa8c4ff, 0x2a2010, 1.6);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff0dd, 1.6);
+  const sun = new THREE.DirectionalLight(0xfff0dd, 2.4);
   sun.position.set(12, 22, 8);
   sun.castShadow = !!tier.shadows;
   if (tier.shadows) {
