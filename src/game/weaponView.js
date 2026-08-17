@@ -138,11 +138,11 @@ export class WeaponView {
     // recoil spring + idle sway
     this.recoil = Math.max(0, this.recoil - dt * 6);
     const t = performance.now() / 1000;
-    const sway = moving ? Math.sin(t * 9) * 0.012 : Math.sin(t * 1.5) * 0.004;
+    const sway = moving ? Math.sin(t * 9) * 0.022 : Math.sin(t * 1.5) * 0.006;
     const swayY = moving ? Math.abs(Math.cos(t * 9)) * 0.01 : 0;
-    this.group.position.set(this.baseX + sway, this.baseY + swayY + (this.reloading ? -0.18 : 0), this.baseZ + this.recoil * 0.12);
-    this.group.rotation.set(-this.recoil * 0.25 + (this.reloading ? -0.5 : 0), 0, this.reloading ? 0.3 : 0);
-    this.flash.material.opacity *= 0.55;
+    this.group.position.set(this.baseX + sway, this.baseY + swayY + (this.reloading ? -0.18 : 0), this.baseZ + this.recoil * 0.22);
+    this.group.rotation.set(-this.recoil * 0.45 + (this.reloading ? -0.5 : 0), 0, this.reloading ? 0.3 : 0);
+    this.flash.material.opacity *= 0.7;
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const tr = this.tracers[i]; tr.life -= dt; tr.m.material.opacity = Math.max(0, tr.life / tr.max) * 0.9;
       if (tr.life <= 0) { this.scene.remove(tr.m); tr.m.geometry.dispose(); this.tracers.splice(i, 1); }

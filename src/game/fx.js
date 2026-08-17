@@ -59,11 +59,11 @@ export class FX {
     this._viewProj = new THREE.Matrix4();
 
     // camera shake
-    this.shake = createShake({ decay: 1.6, maxOffset: 0.09, maxRoll: 0.05, freq: 22 });
+    this.shake = createShake({ decay: 1.8, maxOffset: 0.16, maxRoll: 0.09, freq: 24 });
 
     // muzzle light + hit light
-    this.muzzle = new THREE.PointLight(0xffc070, 0, 8, 2);
-    camera.add(this.muzzle); this.muzzle.position.set(0.3, -0.2, -0.8);
+    this.muzzle = new THREE.PointLight(0xffc070, 0, 14, 1.6);
+    scene.add(this.muzzle);
     this.hitLight = new THREE.PointLight(0xffe0a0, 0, 6, 2);
     scene.add(this.hitLight);
     this.hitLightT = 0;
@@ -81,7 +81,7 @@ export class FX {
   }
   hit(pos, dir, crit) {
     this.burst(crit ? "crit" : "hit", pos, dir);
-    this.hitLight.position.copy(pos); this.hitLight.intensity = crit ? 6 : 2.5; this.hitLightT = 0.06;
+    this.hitLight.position.copy(pos); this.hitLight.intensity = crit ? 16 : 7; this.hitLightT = crit ? 0.14 : 0.09;
   }
   kill(pos) { this.burst("kill", pos); this.burst("spark", pos); }
   explosion(pos, radius = 3) {
@@ -90,7 +90,7 @@ export class FX {
     this.trauma(0.35 + radius * 0.05);
     this.scorch(pos, radius * 0.4);
   }
-  muzzleFlash(strength = 1) { this.muzzle.intensity = 6 * strength; this.burst("muzzle", this._muzzleWorld(), this._forward()); }
+  muzzleFlash(strength = 1) { const m = this._muzzleWorld(); this.muzzle.position.copy(m).addScaledVector(this._forward(), 0.6); this.muzzle.intensity = 22 * strength; this.burst("muzzle", m, this._forward()); }
   dash(pos) { this.burst("dash", pos); }
   pickup(pos) { this.burst("pickup", pos); }
   burn(pos) { this.burst("burn", pos); }
@@ -123,7 +123,7 @@ export class FX {
     g.setDrawRange(0, n);
 
     // lights decay
-    this.muzzle.intensity *= Math.pow(0.001, dt);
+    this.muzzle.intensity *= Math.pow(0.02, dt);
     if (this.hitLightT > 0) { this.hitLightT -= dt; if (this.hitLightT <= 0) this.hitLight.intensity = 0; }
 
     // damage numbers
@@ -141,7 +141,7 @@ export class FX {
       el.style.display = "block";
       el.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%,-50%) scale(${it.scale * pop})`;
       el.style.opacity = it.alpha;
-      el.style.fontSize = "18px";
+      el.style.fontSize = it.kind === "crit" ? "26px" : "21px";
       el.style.color = it.kind === "crit" ? "#ffe066" : it.kind === "heal" ? "#6cff9a" : it.kind === "dot" ? "#ff8a3a" : "#ffffff";
       el.textContent = it.text + (it.kind === "crit" ? "!" : "");
     }

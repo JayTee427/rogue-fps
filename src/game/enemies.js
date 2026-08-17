@@ -61,7 +61,7 @@ export class EnemyManager {
     const mesh = new THREE.Mesh(look.geo(), mat);
     mesh.position.set(x, look.y, z);
     mesh.castShadow = true;
-    if (elite) mesh.scale.multiplyScalar(1.25);
+    if (elite) mesh.scale.multiplyScalar(1.4);
     // eyes / tell
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 6), EYE);
     eye.position.set(0, look.size * 0.3, look.size * 0.5);
@@ -111,6 +111,7 @@ export class EnemyManager {
           const jit = Math.sin(e.t * 9) * 0.6;
           this._move(e, (nx - nz * jit * 0.4) * spd, (nz + nx * jit * 0.4) * spd, dt, arena);
           m.rotation.y += dt * 6; m.position.y = LOOKS.skitter.y + Math.abs(Math.sin(e.t * 12)) * 0.15;
+          e.voiceT = (e.voiceT ?? Math.random() * 1.5) - dt; if (e.voiceT <= 0 && dist < 14) { SFX.skitterChitter(); e.voiceT = 1.2 + Math.random() * 1.6; }
           if (dist < 1.3 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 0.8; }
           break;
         }
@@ -118,16 +119,16 @@ export class EnemyManager {
           const want = dist > 14 ? 1 : dist < 9 ? -1 : 0;
           this._move(e, nx * want * spd, nz * want * spd, dt, arena);
           m.lookAt(pp.x, m.position.y, pp.z);
-          if (e.state === "seek" && e.cd <= 0) { e.state = "aim"; e.stateT = 0; }
+          if (e.state === "seek" && e.cd <= 0) { e.state = "aim"; e.stateT = 0; SFX.sentinelCharge(); }
           if (e.state === "aim") {
-            m.material.emissive.setHex(0xff2020); m.material.emissiveIntensity = Math.min(1.2, e.stateT * 2);   // the laser-sight tell
+            m.material.emissive.setHex(0xff2020); m.material.emissiveIntensity = 0.8 + Math.min(3.2, e.stateT * 4.5);   // the laser-sight tell
             if (e.stateT > 0.75) { e.state = "seek"; e.cd = 2.2 + Math.random(); this._restoreGlow(e); this._shoot(e, pp, 26, e.damage); }
           }
           break;
         }
         case "brute": {                                              // roar, glow, then charge
-          if (e.state === "seek") { this._move(e, nx * spd, nz * spd, dt, arena); if (dist < 9 && e.cd <= 0) { e.state = "windup"; e.stateT = 0; SFX.bossRoar(); } }
-          else if (e.state === "windup") { m.material.emissive.setHex(0xff5522); m.material.emissiveIntensity = e.stateT * 2; m.scale.setScalar((e.elite ? 1.25 : 1) * (1 + Math.sin(e.stateT * 20) * 0.04)); if (e.stateT > 0.7) { e.state = "charge"; e.stateT = 0; e.chargeDir = { x: nx, z: nz }; } }
+          if (e.state === "seek") { this._move(e, nx * spd, nz * spd, dt, arena); if (dist < 9 && e.cd <= 0) { e.state = "windup"; e.stateT = 0; SFX.bruteRoar(); } }
+          else if (e.state === "windup") { m.material.emissive.setHex(0xff5522); m.material.emissiveIntensity = 1 + e.stateT * 4; m.scale.setScalar((e.elite ? 1.35 : 1) * (1 + Math.sin(e.stateT * 20) * 0.12)); if (e.stateT > 0.7) { e.state = "charge"; e.stateT = 0; e.chargeDir = { x: nx, z: nz }; } }
           else if (e.state === "charge") { this._move(e, e.chargeDir.x * spd * 4.5, e.chargeDir.z * spd * 4.5, dt, arena); if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.5; } if (e.stateT > 0.6) { e.state = "seek"; e.cd = 2.5; this._restoreGlow(e); m.scale.setScalar(e.elite ? 1.25 : 1); } }
           m.lookAt(pp.x, m.position.y, pp.z);
           break;
@@ -135,13 +136,14 @@ export class EnemyManager {
         case "popper": {                                             // run at you, beep faster, explode
           this._move(e, nx * spd * (1 + Math.min(1, e.t * 0.1)), nz * spd, dt, arena);
           const rate = Math.max(0.12, Math.min(1, dist / 12));
-          e.beepT += dt; if (e.beepT > rate) { e.beepT = 0; SFX.popperBeep(1 - rate); m.material.emissive.setHex(0xffaa00); m.material.emissiveIntensity = 1.5; } else m.material.emissiveIntensity = Math.max(0.7, m.material.emissiveIntensity * 0.85);
+          e.beepT += dt; if (e.beepT > rate) { e.beepT = 0; SFX.popperBeep(1 - rate); m.material.emissive.setHex(0xffaa00); m.material.emissiveIntensity = 3.0; } else m.material.emissiveIntensity = Math.max(0.7, m.material.emissiveIntensity * 0.85);
           if (dist < 1.6) { events.push({ type: "popperBoom", pos: m.position.clone(), dmg: e.damage, r: 3 }); this._kill(e, events, true); }
           break;
         }
         case "warden": {                                             // slow advance, shield faces you
           this._move(e, nx * spd, nz * spd, dt, arena);
           m.lookAt(pp.x, m.position.y, pp.z);
+          e.voiceT = (e.voiceT ?? 0.5) - dt; if (e.voiceT <= 0 && dist < 12) { SFX.wardenHum(); e.voiceT = 2.2; }
           if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.2; }
           break;
         }
@@ -151,6 +153,7 @@ export class EnemyManager {
           const ox = tx - m.position.x, oz = tz - m.position.z, od = Math.hypot(ox, oz) || 1;
           this._move(e, ox / od * spd, oz / od * spd, dt, arena);
           m.position.y = LOOKS.wisp.y + Math.sin(e.t * 3) * 0.6; m.rotation.y += dt * 2; m.rotation.x += dt * 1.3;
+          e.voiceT = (e.voiceT ?? Math.random()) - dt; if (e.voiceT <= 0 && dist < 16) { SFX.wispWhine(); e.voiceT = 1.8 + Math.random(); }
           if (e.cd <= 0) { this._shoot(e, pp, 14, e.damage, true); e.cd = 2.6; }
           break;
         }

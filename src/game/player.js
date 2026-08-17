@@ -7,7 +7,7 @@ import * as THREE from "three";
 
 const GRAVITY = 30;
 const JUMP_VEL = 11;
-const DASH_SPEED = 34;
+const DASH_SPEED = 46;
 const DASH_TIME = 0.16;
 const EYE_HEIGHT = 1.7;
 const RADIUS = 0.45;
@@ -26,7 +26,7 @@ export class Player {
     this.dashDir = new THREE.Vector3();
     this.sliding = false;
     this.speedMult = 1;        // from slow statuses etc.
-    this.stats = { moveSpeed: 8, jumps: 1, dashCooldown: 3, gravity: 1, airControl: 0.35, dashPhases: false, slide: false };
+    this.stats = { moveSpeed: 8, jumps: 1, dashCooldown: 1.4, gravity: 1, airControl: 0.35, dashPhases: false, slide: false };
     this.arena = null;         // { halfW, halfD, blocks: [{x,z,w,d,h}] }
     this.bobT = 0;
     this._fwd = new THREE.Vector3(); this._right = new THREE.Vector3(); this._wish = new THREE.Vector3();
@@ -114,12 +114,12 @@ export class Player {
     // camera
     const moving = Math.hypot(this.vel.x, this.vel.z);
     this.bobT += dt * (this.onGround ? moving * 1.4 : 0);
-    const bob = this.onGround ? Math.sin(this.bobT) * 0.035 * Math.min(1, moving / 6) : 0;
+    const bob = this.onGround ? Math.sin(this.bobT) * 0.055 * Math.min(1, moving / 6) : 0;
     this.camera.position.set(this.pos.x, this.pos.y + bob - (this.sliding ? 0.5 : 0), this.pos.z);
     this.camera.rotation.set(0, 0, 0, "YXZ");
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
-    this.camera.rotation.z = -this.vel.dot(this._right) * 0.0025;   // subtle strafe roll
+    this.camera.rotation.z = -this.vel.dot(this._right) * 0.006;   // subtle strafe roll
   }
 
   _collideXZ() {

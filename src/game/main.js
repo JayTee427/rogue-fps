@@ -66,6 +66,7 @@ function beginRun(seed, cursesEnabled) {
   G.run = newRun(seed, { cursesEnabled });
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
+  SFX.startAmbient();
   onFloorStart(true);
 }
 
@@ -139,7 +140,7 @@ function enterBoss() {
 
 function applyStats() {
   const s = G.run.stats;
-  player.setStats({ moveSpeed: s.moveSpeed, jumps: s.jumps ?? 1, dashCooldown: G.mods.noDash ? 9999 : (s.dashCooldown ?? 3), gravity: (s.gravity ?? 1) * (G.mods.lowGravity ? 0.45 : 1), airControl: s.airControl ? 1 : 0.35, dashPhases: !!s.dashPhases, slide: !!s.slide });
+  player.setStats({ moveSpeed: s.moveSpeed, jumps: s.jumps ?? 1, dashCooldown: G.mods.noDash ? 9999 : (s.dashCooldown ?? 1.4), gravity: (s.gravity ?? 1) * (G.mods.lowGravity ? 0.45 : 1), airControl: s.airControl ? 1 : 0.35, dashPhases: !!s.dashPhases, slide: !!s.slide });
 }
 
 function onRoomCleared() {
@@ -201,6 +202,7 @@ function onBossDown() {
 function endRun(kind) {
   const r = G.run;
   input.releaseLock();
+  SFX.stopAmbient();
   const sc = r.finalScore;
   if (sc > G.best) { G.best = sc; localStorage.setItem("hs_best", String(sc)); }
   $("#repSub").textContent = kind === "extracted" ? "extracted · banked" : "run over";
@@ -235,8 +237,8 @@ function damagePlayer(amount, why = "?") {
   if (still && s.stillDamageTaken) amount *= s.stillDamageTaken;
   if (G.shield > 0) { const a = Math.min(G.shield, amount); G.shield -= a; amount -= a; }
   G.hp -= amount; G.invuln = 0.35; G.dmgFlash = 1;
-  fx.trauma(Math.min(0.6, 0.15 + amount / 60));
-  SFX.hurt();
+  fx.trauma(Math.min(0.85, 0.28 + amount / 40));
+  SFX.hurt(Math.max(0, G.hp) / G.run.maxHp);
   if (s.bulletTime && G.hp > 0 && G.hp / G.run.maxHp < 0.3 && (G.btCd ?? 0) <= 0) { G.timeScale = 0.6; G.btT = 1; G.btCd = 20; }
   if (G.hp <= 0) {
     G.hp = 0;
@@ -264,7 +266,7 @@ function fire(want, dt) {
   }
   const shot = weaponView.tryFire(want, dt, s, G.roomRng, dir);
   if (!shot) return;
-  if (!shot.beam) { const a = weaponView.archetype; fx.muzzleFlash(a === "railgun" ? 2 : a === "scattergun" ? 1.4 : 1); fx.trauma(a === "railgun" ? 0.25 : a === "scattergun" ? 0.14 : 0.05); }
+  if (!shot.beam) { const a = weaponView.archetype; fx.muzzleFlash(a === "railgun" ? 2 : a === "scattergun" ? 1.4 : 1); fx.trauma(a === "railgun" ? 0.45 : a === "scattergun" ? 0.3 : a === "launcher" ? 0.35 : 0.1); }
   const origin = _o.copy(player.pos);
   const pierce = (s.pierce ?? 0) + (r.weapon.stats.pierce ?? 0);
   let anyHit = false;
@@ -285,7 +287,7 @@ function fire(want, dt) {
       const hitPos = origin.clone().addScaledVector(ray.dir, h.t);
       fx.hit(hitPos, ray.dir, res.crit);
       fx.number(res.damage, h.e.mesh.position, res.crit ? "crit" : "hit", h.e.mesh.uuid);
-      if (res.crit) { SFX.crit(); G.hitstop = Math.max(G.hitstop, 0.045); fx.trauma(0.08); } else SFX.hit();
+      if (res.crit) { SFX.crit(); G.hitstop = Math.max(G.hitstop, 0.09); fx.trauma(0.22); } else SFX.hit();
       // Static Charge / Arc mod: every Nth hit chains lightning through nearby enemies
       if (s.chainEveryN > 0) {
         G.hitCount = (G.hitCount ?? 0) + 1;
@@ -313,7 +315,7 @@ function fire(want, dt) {
 function onKill(e, res) {
   const s = G.run.stats;
   G.killsThisRoom++;
-  fx.kill(e.mesh.position); fx.trauma(0.12);
+  fx.kill(e.mesh.position); fx.trauma(0.28); G.hitstop = Math.max(G.hitstop, 0.05);
   heal(s.healOnKill ?? 0);
   if (s.dashOnKill) player.dashCd = 0;
   if (s.onKillExplode > 0) explode(e.mesh.position, 2.5, res.damage * s.onKillExplode);
@@ -390,6 +392,9 @@ function frame(now) {
     }
     G.invuln = Math.max(0, G.invuln - dt);
     G.dmgFlash = Math.max(0, G.dmgFlash - dt * 3);
+    // low-health heartbeat: faster as it gets worse
+    const frac = G.hp / G.run.maxHp;
+    if (frac < 0.4 && (G.roomActive || G.bossMode)) { G.beatT = (G.beatT ?? 0) - dt; if (G.beatT <= 0) { SFX.heartbeat(frac); G.beatT = 0.45 + frac * 1.6; } }
     fx.update(dt, G.camBase ?? { x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z });
 
     // exit pad
