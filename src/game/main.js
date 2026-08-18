@@ -20,6 +20,8 @@ import { layoutDressing, PROP_KINDS } from "core/dressing.js";
 import { rollStock, buy, rerollStock, REROLL_COST } from "core/shop.js";
 import { BOONS, rollPact, acceptPact, refusePact } from "core/pact.js";
 import { activeSynergies, synergyEffects } from "core/synergy.js";
+import { passiveMods } from "core/effects.js";
+import { onShoot, onEnemyHit, onKill as killEffects, onHitTaken, onDeath } from "core/triggers.js";
 import { computeStats, BASE_STATS } from "core/stats.js";
 
 import { createRenderer, buildArena, buildDressing, COLORS } from "./renderer.js";
@@ -70,6 +72,7 @@ const G = {
   lastFrame: performance.now(), best: Number(localStorage.getItem("hs_best") || 0),
   fpsAcc: 0, fpsN: 0, seedText: "",
   qTier: tierName, qWindow: [], qCooldown: 3,
+  passives: null, regenAcc: 0,
   // director: a running read on how well the player is doing, persisted so a
   // run starts where the last one left off rather than assuming average.
   skill: Number(localStorage.getItem("hs_skill") ?? 0.5),
@@ -263,7 +266,8 @@ function enterBoss() {
 }
 
 function addGold(n) {
-  G.run = { ...G.run, gold: Math.max(0, Math.round((G.run.gold ?? 0) + n)) };
+  const mult = n > 0 ? (G.passives?.goldMult ?? 1) : 1;   // multiply gains, never losses
+  G.run = { ...G.run, gold: Math.max(0, Math.round((G.run.gold ?? 0) + n * mult)) };
   const el = $("#goldNum");
   if (el) el.textContent = String(G.run.gold);
 }
@@ -289,6 +293,7 @@ function recomputeStats() {
     SFX.roomClear();
   }
   G.synergies = combos;
+  G.passives = passiveMods(G.run.held ?? []);
   const oldMax = G.run.maxHp ?? stats.maxHp;
   const newMax = stats.maxHp;
   G.run = { ...G.run, stats, maxHp: newMax };
@@ -613,12 +618,46 @@ function damagePlayer(amount, why = "?") {
   const still = Math.hypot(player.vel.x, player.vel.z) < 0.5;
   if (still && s.stillDamageTaken) amount *= s.stillDamageTaken;
   if (G.shield > 0) { const a = Math.min(G.shield, amount); G.shield -= a; amount -= a; }
+  const taken = onHitTaken(G.run.held ?? [], { amount, hp: G.hp, maxHp: G.run.maxHp });
+  if (taken.shieldGained > 0) G.shield += taken.shieldGained;
+  if (taken.goldLost > 0) addGold(-taken.goldLost);
+  if (taken.invulnSecs > 0) G.invuln = Math.max(G.invuln, taken.invulnSecs);
+  if (taken.critBonus > 0) G.critBonus = taken.critBonus;      // read by fire()
+  const spikes = (G.run.stats.damageOnMeleeHit ?? 0) * amount;
+  if (spikes > 0) {
+    for (const en of enemies.list) {
+      if (!en.alive || en.mesh.position.distanceTo(player.pos) > 3) continue;
+      const hp2 = Math.max(0, en.hp - spikes);
+      if (enemies.damage(en, spikes, hp2, hp2 <= 0)) onKill(en, { damage: spikes });
+    }
+    fx.trauma(0.12);
+  }
+  if (taken.reflectDamage > 0) {
+    // thorns / spiked_shell: hurt whatever is close enough to have hit you
+    for (const en of enemies.list) {
+      if (!en.alive || en.mesh.position.distanceTo(player.pos) > 4.5) continue;
+      const hp2 = Math.max(0, en.hp - taken.reflectDamage);
+      if (enemies.damage(en, taken.reflectDamage, hp2, hp2 <= 0)) onKill(en, { damage: taken.reflectDamage });
+      break;
+    }
+  }
   G.hp -= amount; G.invuln = 0.35; G.dmgFlash = 1;
   fx.trauma(Math.min(0.85, 0.28 + amount / 40));
   SFX.hurt(Math.max(0, G.hp) / G.run.maxHp);
   if (s.bulletTime && G.hp > 0 && G.hp / G.run.maxHp < 0.3 && (G.btCd ?? 0) <= 0) { G.timeScale = 0.6; G.btT = 1; G.btCd = 20; }
   if (G.hp <= 0) {
     G.hp = 0;
+    // second_wind, borrowed_time: an item-granted revive, consumed on use
+    const rev = onDeath(G.run.held ?? [], { hp: G.hp, maxHp: G.run.maxHp, floor: G.run.floor });
+    if (rev.revive && !(G.revivesUsed ?? []).includes(rev.consumed)) {
+      G.revivesUsed = [...(G.revivesUsed ?? []), rev.consumed];
+      G.hp = Math.max(1, rev.reviveHp);
+      G.invuln = 1.8;
+      const nm = ITEM_BY_ID[rev.consumed]?.name ?? "SOMETHING";
+      toast(`${nm.toUpperCase()} — not yet`, true, 2400);
+      SFX.extract();
+      return;
+    }
     const next = die(G.run);
     if (next.phase === "dead") { G.run = next; endRun("dead"); return; }
     G.run = next;
@@ -655,10 +694,18 @@ function fire(want, dt) {
       if (h.blocked) { toast("BLOCKED", true, 500); continue; }
       const stats = { ...s, damage: s.damage * (r.weapon.stats.damage ?? 1) / (r.weapon.stats.damage ? 1 : 1) };
       // player stats.damage is a multiplier on the weapon's damage
-      const combined = { ...s, damage: (r.weapon.stats.damage ?? 10) * (r.stats.damage ?? 1) * (shot.dmgMult ?? 1) };
+      const combined = { ...s, damage: (r.weapon.stats.damage ?? 10) * (r.stats.damage ?? 1) * (shot.dmgMult ?? 1),
+        critChance: Math.min(1, (s.critChance ?? 0) + (G.critBonus ?? 0)) };
       const target = { hp: h.e.hp, maxHp: h.e.maxHp, armor: h.e.armor ?? 0, statuses: h.e.statuses };
-      const res = resolveHit({ isHeadshot: false, isFirstShot: shot.isFirst, isLastShot: shot.isLast }, target, combined, G.roomRng);
+      const fired = onShoot(G.run.held ?? [], { shotIndex: weaponView.shotIndex ?? 0, magSize: weaponView.capacity?.() ?? 10 });
+      if (fired.damageMult !== 1) combined.damage *= fired.damageMult;
+      const res = resolveHit({ isHeadshot: false, isFirstShot: shot.isFirst || fired.guaranteedCrit, isLastShot: shot.isLast }, target, combined, G.roomRng);
       h.e.statuses = res.statusesAfter;
+      // frostbite, static_charge, storm_caller, voidheart
+      const hitFx = onEnemyHit(G.run.held ?? [], { damage: res.damage, isCrit: res.crit });
+      if (hitFx.shockDamage > 0) { const hp2 = Math.max(0, h.e.hp - hitFx.shockDamage); if (enemies.damage(h.e, hitFx.shockDamage, hp2, hp2 <= 0)) onKill(h.e, { damage: hitFx.shockDamage }); }
+      if (hitFx.slowFactor > 0) { h.e.slowMult = Math.min(h.e.slowMult ?? 1, 1 - hitFx.slowFactor); h.e.slowT = hitFx.slowSecs; }
+      if (hitFx.lifestealHp > 0) heal(hitFx.lifestealHp);
       const killed = enemies.damage(h.e, res.damage, res.hpAfter, res.killed);
       anyHit = true;
       const hitPos = origin.clone().addScaledVector(ray.dir, h.t);
@@ -697,6 +744,25 @@ function onKill(e, res) {
   addGold(2 + G.run.floor);
   fx.kill(e.mesh.position); fx.trauma(0.28); duckMusic(0.3, 0.2); G.hitstop = Math.max(G.hitstop, 0.05);
   heal(s.healOnKill ?? 0);
+  // doombringer, dash_reset, chain_reaction, midas_touch
+  const kf = killEffects(G.run.held ?? [], { damage: res?.damage ?? 0, enemyHp: e.maxHp });
+  if (kf.heal > 0) heal(kf.heal);
+  if (kf.gold > 0) addGold(kf.gold);
+  if (kf.dashReset) player.dashCd = 0;
+  if (kf.explode) explode(e.mesh.position, kf.explode.radius, kf.explode.damage);
+  // singularity (gravityWell): the corpse briefly drags everything in
+  const well = G.run.stats.gravityWell ?? 0;
+  if (well > 0) {
+    const centre = { x: e.mesh.position.x, y: e.mesh.position.y, z: e.mesh.position.z };
+    const pool = enemies.list.filter((x) => x.alive).map((x) => ({ id: x.mesh.uuid, x: x.mesh.position.x, y: x.mesh.position.y, z: x.mesh.position.z }));
+    for (const pull of singularityPull(centre, 8 * well, pool)) {
+      const target = enemies.list.find((x) => x.mesh.uuid === pull.id);
+      if (!target || !target.alive) continue;
+      target.mesh.position.x += (centre.x - target.mesh.position.x) * Math.min(0.8, pull.strength ?? 0.4);
+      target.mesh.position.z += (centre.z - target.mesh.position.z) * Math.min(0.8, pull.strength ?? 0.4);
+    }
+    fx.pickup(e.mesh.position.clone());
+  }
   if (s.dashOnKill) player.dashCd = 0;
   if (s.onKillExplode > 0) explode(e.mesh.position, 2.5, res.damage * s.onKillExplode);
   if (e.isBoss) {
@@ -855,7 +921,14 @@ function frame(now) {
     $("#dmgflash").classList.toggle("on", G.dmgFlash > 0.05 || (G.hp / G.run.maxHp) < 0.25 && Math.sin(now / 120) > 0);
     if (G.mods.timePressure && G.roomActive) $("#modName").textContent = `COUNTDOWN ${Math.ceil(G.roomTimer)}`;
     // fps counter (dev)
+    if (player.dashed && player.dashInvuln > 0) G.invuln = Math.max(G.invuln, player.dashInvuln);
     if (G.roomActive && !G.bossMode) { pumpWaves(dt); if (G.roomStats) G.roomStats.secs += dt; }
+    // regen_coil and friends: trickle health while the run is live
+    const rps = G.passives?.regenPerSec ?? 0;
+    if (rps > 0 && G.run && G.hp > 0 && G.hp < G.run.maxHp) {
+      G.regenAcc += rps * dt;
+      if (G.regenAcc >= 1) { const whole = Math.floor(G.regenAcc); G.regenAcc -= whole; heal(whole); }
+    }
     // Ears follow the camera, or HRTF panning does nothing at all.
     setListener(camera.position, -Math.sin(player.yaw), -Math.cos(player.yaw));
     if (R.grade) R.grade.uniforms.uDamage.value = G.dmgFlash * 0.55;

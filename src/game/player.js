@@ -62,16 +62,21 @@ export class Player {
     if (input.dash && this.dashCd <= 0 && this.dashT <= 0) {
       const dir = this._wish.lengthSq() > 0.01 ? this._wish.clone() : this._fwd.clone();
       this.dashDir.copy(dir.normalize());
-      this.dashT = DASH_TIME;
+      // blink_dash (shortTeleport) stretches the dash; shadow_step
+      // (teleportOnDodge) turns it into a blink and hands back i-frames.
+      this.dashT = DASH_TIME * (1 + (s.shortTeleport ?? 0));
       this.dashCd = s.dashCooldown;
       this.vel.y = Math.max(this.vel.y, 0);
       this.dashed = true;
+      this.dashBlink = (s.teleportOnDodge ?? 0) > 0;
+      this.dashInvuln = this.dashBlink ? 0.35 + (s.teleportOnDodge ?? 0) : 0;
     } else this.dashed = false;
 
     if (this.dashT > 0) {
       this.dashT -= dt;
-      this.vel.x = this.dashDir.x * DASH_SPEED;
-      this.vel.z = this.dashDir.z * DASH_SPEED;
+      const blink = this.dashBlink ? 1.6 : 1;      // shadow_step covers ground faster
+      this.vel.x = this.dashDir.x * DASH_SPEED * blink;
+      this.vel.z = this.dashDir.z * DASH_SPEED * blink;
     } else {
       // ground: snappy accel toward wish; air: partial control
       const ctrl = this.onGround ? 1 : (s.airControl ?? 0.35);
