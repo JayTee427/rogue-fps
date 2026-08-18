@@ -17,6 +17,8 @@ import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
 import { planEncounter, updateSkill } from "core/director.js";
 import { rollChallenge, checkChallenge } from "core/challenges.js";
 import { layoutDressing, PROP_KINDS } from "core/dressing.js";
+import { BIOMES, pickBiome, biomePalette, biomeLayout } from "core/arenas.js";
+import { ROOM_EVENTS, rollEvent, resolveEvent } from "core/events.js";
 import { rollStock, buy, rerollStock, REROLL_COST } from "core/shop.js";
 import { BOONS, rollPact, acceptPact, refusePact } from "core/pact.js";
 import { activeSynergies, synergyEffects } from "core/synergy.js";
@@ -189,7 +191,16 @@ function enterRoom() {
   G.roomRng = seedRng;
   G.mods = { swarm: room.modifier === "swarm", noDash: room.modifier === "no_dash", lowGravity: room.modifier === "low_gravity", darkness: room.modifier === "darkness", timePressure: room.modifier === "time_pressure" };
   G.arena?.dispose();
-  G.arena = buildArena(scene, seedRng.fork("arena"), { blockCount: undefined });
+  // Each floor gets its own biome: its own palette, fog and room proportions.
+  const biomeId = pickBiome(makeRng(r.seed).fork(`biome${r.floor}`), r.floor);
+  const bp = biomePalette(biomeId);
+  const bl = biomeLayout(seedRng.fork("shape"), biomeId, r.floor);
+  G.biome = biomeId;
+  G.arena = buildArena(scene, seedRng.fork("arena"), {
+    halfW: bl.halfW, halfD: bl.halfD, blockCount: bl.blockCount,
+    palette: { floor: bp.floor, wall: bp.wall, trim: bp.trim, accent: bp.accent, sky: bp.sky },
+    fogDensity: biomeFog(bp.fogDensity),
+  });
   player.arena = G.arena;
   player.reset(0, G.arena.halfD - 4);
   player.yaw = 0; player.pitch = 0;
@@ -226,8 +237,9 @@ function enterRoom() {
   music?.setBoss(false);
   G.roomTimer = G.mods.timePressure ? 60 : 0;
   G.shield = r.stats.roomShield ?? 0;
-  scene.fog.density = G.mods.darkness ? 0.11 : 0.028;
+  scene.fog.density = G.mods.darkness ? 0.11 : biomeFog(biomePalette(G.biome ?? "").fogDensity);
   $("#floorNum").textContent = `FLOOR ${r.floor}`;
+  $("#biomeName").textContent = (BIOMES[G.biome]?.name ?? "").toUpperCase();
   $("#roomNum").textContent = `ROOM ${r.roomIndex + 1}/5`;
   $("#modName").textContent = room.modifier ? ROOM_MODIFIERS[room.modifier].name.toUpperCase() : (room.hazardTag ? room.hazardTag.replace("_", " ").toUpperCase() : "");
   if (room.modifier) toast(ROOM_MODIFIERS[room.modifier].name + " — " + ROOM_MODIFIERS[room.modifier].desc, true, 2200);
@@ -263,6 +275,14 @@ function enterBoss() {
   music?.setBoss(true);
   toast(`${b.name} — ${b.affix}`, true, 2600); SFX.bossRoar();
   weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
+}
+
+/** Biome fog is a 0..0.5 "how thick" rating; the game plays between 0.022 and
+ *  0.075, with 0.11 reserved for the darkness modifier. Map one onto the other so
+ *  a hull walk still reads clearer than a reactor without going opaque. */
+function biomeFog(v) {
+  const t = Math.max(0, Math.min(1, (Number.isFinite(v) ? v : 0.1) / 0.4));
+  return 0.022 + t * 0.053;
 }
 
 function addGold(n) {
@@ -541,7 +561,64 @@ function openHeal() {
   if (G.run.phase === "door") openDoors(); else if (G.run.phase === "boss") enterBoss();
 }
 
+function openEvent(ev) {
+  G.event = ev;
+  $("#evTitle").textContent = ev.name.toUpperCase();
+  $("#evPrompt").textContent = ev.prompt;
+  const wrap = $("#evChoices"); wrap.innerHTML = "";
+  ev.choices.forEach((ch, i) => {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = `<h3>${ch.label}</h3><p>${ch.desc}</p>`;
+    el.addEventListener("click", () => resolveRoomEvent(i));
+    wrap.appendChild(el);
+  });
+  show("#event");
+}
+
+function resolveRoomEvent(choiceIndex) {
+  const ev = G.event;
+  G.event = null;
+  const out = resolveEvent(makeRng(G.run.seed).fork(`ev${G.run.floor}-${G.run.roomIndex}`),
+    ev.id, choiceIndex, { floor: G.run.floor, held: G.run.held, gold: G.run.gold ?? 0, hp: G.hp, maxHp: G.run.maxHp });
+  if (out.gold) addGold(out.gold);
+  if (out.heal) heal(out.heal);
+  if (out.damage) { G.hp = Math.max(1, G.hp - out.damage); fx.trauma(0.4); SFX.hurt(G.hp / G.run.maxHp); }
+  if (out.maxHp) { G.run = { ...G.run, maxHp: Math.max(1, G.run.maxHp + out.maxHp) }; G.hp = Math.min(G.hp, G.run.maxHp); }
+  if (out.grantItem && ITEM_BY_ID[out.grantItem]) {
+    G.run = { ...G.run, held: [...G.run.held, out.grantItem] };
+    recomputeStats();
+  }
+  toast(out.text, (out.damage ?? 0) > 0, 3000);
+  SFX.ui();
+  // Enemies from an event drop into the room you are about to leave; hold the
+  // doors until they are dealt with rather than spawning into an empty screen.
+  if (out.spawnEnemies > 0) {
+    for (let i = 0; i < out.spawnEnemies; i++) {
+      const a = (i / out.spawnEnemies) * Math.PI * 2;
+      enemies.spawn(scaleEnemy("skitter", G.run.floor, G.run.roomIndex, null),
+        Math.cos(a) * 8, Math.sin(a) * 8, false);
+    }
+    G.roomActive = true; G.roomCleared = false;
+    show("#hud"); input.requestLock();
+    return;
+  }
+  openDoors();
+}
+
 function openDoors() {
+  // Roughly one room in three offers a choice instead of just a corridor.
+  if (!G.eventSeen?.includes(`${G.run.floor}-${G.run.roomIndex}`) && G.run.roomIndex < 4) {
+    const er = makeRng(G.run.seed).fork(`evroll${G.run.floor}-${G.run.roomIndex}`);
+    if (er.chance(0.34)) {
+      const ev = rollEvent(er, G.run.floor, G.eventsUsed ?? []);
+      if (ev) {
+        G.eventSeen = [...(G.eventSeen ?? []), `${G.run.floor}-${G.run.roomIndex}`];
+        G.eventsUsed = [...(G.eventsUsed ?? []), ev.id];
+        return openEvent(ev);
+      }
+    }
+  }
   const r = G.run;
   const doors = r.currentFloor.rooms[r.roomIndex].doors;
   const wrap = $("#doorCards"); wrap.innerHTML = "";

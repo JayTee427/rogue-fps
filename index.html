@@ -127,6 +127,9 @@
     .wstats .d.up { color: #6cff9a; } .wstats .d.down { color: #ff6b6b; } .wstats .d.same { color: var(--dim); }
     #weaponOffer .held { opacity: .55; }
     #synLine{position:absolute;left:calc(14px + var(--safe-l, 0px));bottom:calc(64px + var(--safe-b, 0px));font-size:11px;letter-spacing:.14em;color:#6cff9a;opacity:.8;text-shadow:0 0 10px rgba(108,255,154,.35);pointer-events:none}
+    #biomeName{color:#7fd4ff;opacity:.75;letter-spacing:.1em}
+    #evPrompt{text-align:center;color:var(--dim);max-width:520px;line-height:1.6;margin-bottom:6px}
+    #event .cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;max-width:100%}
     .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
     .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
     #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
@@ -164,7 +167,7 @@
   <div id="hud" class="layer hidden">
     <div id="crosshair"></div>
     <div id="dmgflash"></div>
-    <div id="floor"><b id="floorNum">FLOOR 1</b> · <span id="roomNum">ROOM 1/5</span> · <span id="modName"></span></div>
+    <div id="floor"><b id="floorNum">FLOOR 1</b> · <span id="roomNum">ROOM 1/5</span> · <span id="modName"></span> <span id="biomeName"></span></div>
     <div id="chalLine"></div>
     <div id="items"></div>
     <div id="perf"></div>
@@ -216,6 +219,13 @@
     <div class="sub">weapons cache · swap or keep</div>
     <div class="cards" id="weaponCards"></div>
     <div class="row"><button class="big" id="btnSwap">Take It</button><button class="big ghost" id="btnKeep">Keep Mine</button></div>
+  </div>
+
+  <!-- room event -->
+  <div id="event" class="layer screen hidden">
+    <div class="sub" id="evTitle">SOMETHING HERE</div>
+    <div id="evPrompt"></div>
+    <div class="cards" id="evChoices"></div>
   </div>
 
   <!-- shop -->

@@ -153,6 +153,8 @@ const PALETTES = [
 export function buildArena(scene, rng, opts = {}) {
   const halfW = opts.halfW ?? 16, halfD = opts.halfD ?? 20;
   const pal = opts.palette ?? rng.pick(PALETTES);
+  // A biome palette carries its own atmosphere; the built-in ones do not.
+  if (opts.fogDensity != null && scene.fog) scene.fog.density = opts.fogDensity;
   const g = new THREE.Group();
   g.name = "arena";
 
