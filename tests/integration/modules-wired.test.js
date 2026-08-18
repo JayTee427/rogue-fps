@@ -45,3 +45,20 @@ describe("every core module is actually used", () => {
     expect(modules.length).toBeGreaterThan(15);
   });
 });
+
+// A room's enemy count must keep scaling with depth. Swapping the roster source to
+// core/foes.js once flattened every room to two enemies on every floor, because
+// foeRoster returns a fixed count and nothing asserted otherwise.
+describe("room size still scales with depth", () => {
+  it("deep floors field more enemies than floor 1", async () => {
+    const { rollRoster } = await import("core/enemies.js");
+    const { rng } = await import("core/rng.js");
+    const mean = (floor) => {
+      let t = 0;
+      for (let s = 0; s < 40; s++) t += rollRoster(rng(s), floor, 2, {}).length;
+      return t / 40;
+    };
+    expect(mean(6), "floor 6 rooms are no bigger than floor 1").toBeGreaterThan(mean(1));
+    expect(mean(1)).toBeGreaterThan(1);
+  });
+});

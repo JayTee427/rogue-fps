@@ -38,6 +38,7 @@ import { HazardView } from "./hazardView.js";
 import { TIERS } from "core/quality.js";
 import { chainTargets, singularityPull, explosionVictims } from "core/fxitems.js";
 import { applyRun, serializeProfile, deserializeProfile, profileSummary, UNLOCKS } from "core/meta.js";
+import { ACHIEVEMENTS, checkAchievements, newAchievementState, achievementProgress } from "core/achievements.js";
 
 // ------------------------------------------------------------------ boot --
 const $ = (s) => document.querySelector(s);
@@ -65,6 +66,11 @@ const fx = new FX(scene, camera, TIERS[tierName]);
 const hazards = new HazardView(scene);
 let music = null;
 let profile = deserializeProfile(localStorage.getItem("hs_profile"));
+let achState = (() => {
+  try { const raw = JSON.parse(localStorage.getItem("hs_achievements") ?? "null");
+        return raw && Array.isArray(raw.earned) ? raw : newAchievementState(); }
+  catch { return newAchievementState(); }
+})();
 
 // ------------------------------------------------------------------ state --
 const G = {
@@ -160,6 +166,7 @@ function beginRun(seed, cursesEnabled) {
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
   G.runStartedAt = performance.now();
+  G.runDamageTaken = 0; G.runHeadshots = 0;
   SFX.startAmbient();
   music = new MusicPlayer(makeRng(seed).fork("music"));
   music.start();
@@ -656,6 +663,22 @@ function endRun(kind) {
   if (kind === "dead") SFX.death();
   // Meta-progression: totals and unlocks survive the run. itemsHeld is the
   // ARRAY, not its length — meta.js counts it itself.
+  // Achievements read the same summary the profile does.
+  const achSummary = {
+    floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
+    bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted", score: sc,
+    itemsHeld: r.held, secs: Math.round((performance.now() - (G.runStartedAt ?? performance.now())) / 1000),
+    damageTaken: Math.round(G.runDamageTaken ?? 0), headshots: G.runHeadshots ?? 0,
+    curses: r.held.filter((id) => ITEM_BY_ID[id]?.rarity === "cursed").length,
+    synergies: (G.synergies ?? []).length,
+  };
+  const ach = checkAchievements(achState, achSummary);
+  achState = ach.state;
+  localStorage.setItem("hs_achievements", JSON.stringify(achState));
+  if (ach.newly.length) {
+    const names = ach.newly.map((id) => ACHIEVEMENTS[id]?.name ?? id).join(" · ");
+    setTimeout(() => toast(`ACHIEVEMENT — ${names}`, false, 4000), 900);
+  }
   const meta = applyRun(profile, {
     floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
     bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted",
@@ -688,6 +711,7 @@ function renderItems() {
 // ---------------------------------------------------------------- damage --
 function damagePlayer(amount, why = "?") {
   if (G.roomStats) G.roomStats.damageTaken += amount;
+  G.runDamageTaken = (G.runDamageTaken ?? 0) + amount;
   if (G.invuln > 0 || !G.roomActive) return;
   if (window.__dbg) (window.__dmgLog ??= []).push({ t: Math.round(performance.now()), amount: Math.round(amount * 10) / 10, why, hp: Math.round(G.hp) });
   const s = G.run.stats;
@@ -1024,7 +1048,8 @@ function frame(now) {
 // -------------------------------------------------------------- menu wiring --
 function menu() {
   input.releaseLock();
-  $("#bestLine").textContent = (G.best ? `BEST ${G.best.toLocaleString()} · ` : "") + profileSummary(profile).text;
+  $("#bestLine").textContent = (G.best ? `BEST ${G.best.toLocaleString()} · ` : "") + profileSummary(profile).text
+    + " · " + achievementProgress(achState).text;
   $("#menuHint").textContent = input.isTouch ? "left thumb: move · right thumb: look · buttons: fire / dash / jump / reload" : "WASD · mouse · shift dash · space jump · R reload · click to lock";
   show("#menu");
 }

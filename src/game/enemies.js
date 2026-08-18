@@ -4,6 +4,7 @@
 
 import * as THREE from "three";
 import { scaleEnemy, rollRoster, rollAffix } from "core/enemies.js";
+import { EXTRA_FOES, scaleFoe, foeRoster } from "core/foes.js";
 import { tickStatuses } from "core/combat.js";
 import { nextAttack } from "core/bosspatterns.js";
 import { gaitPose, windupPose, flinchPose, deathPose } from "core/anim.js";
@@ -30,7 +31,16 @@ const LOOKS = {
   popper:   { color: 0xffd23a, glow: 0x6a5a0a, size: 0.6,  y: 0.5,  geo: () => new THREE.SphereGeometry(0.5, 8, 6) },
   warden:   { color: 0x8aa8d8, glow: 0x1a2a4a, size: 1.2,  y: 1.2,  geo: () => new THREE.CylinderGeometry(0.6, 0.6, 2.2, 8) },
   wisp:     { color: 0xd08aff, glow: 0x4a1a6a, size: 0.5,  y: 2.6,  geo: () => new THREE.OctahedronGeometry(0.45, 0) },
+  // The four from core/foes.js. Distinct silhouettes, same visual language.
+  lurker:   { color: 0x2f3d4a, glow: 0x0a1a2a, size: 0.7,  y: 0.5,  geo: () => new THREE.TetrahedronGeometry(0.7, 0) },
+  sniper:   { color: 0x8affc8, glow: 0x0a4a2a, size: 0.9,  y: 1.4,  geo: () => new THREE.ConeGeometry(0.32, 2.2, 5) },
+  shaman:   { color: 0xffa8e0, glow: 0x5a0a3a, size: 1.0,  y: 1.6,  geo: () => new THREE.DodecahedronGeometry(0.7, 0) },
+  swarm:    { color: 0xc8ff3a, glow: 0x3a5a0a, size: 0.35, y: 0.8,  geo: () => new THREE.OctahedronGeometry(0.3, 0) },
 };
+
+// The new archetypes borrow a proven behaviour rather than each getting a bespoke
+// state machine: a lurker rushes like a skitter, a sniper holds like a sentinel.
+const BEHAVIOUR = { lurker: "skitter", sniper: "sentinel", shaman: "wisp", swarm: "skitter" };
 
 export class EnemyManager {
   constructor(scene) {
@@ -57,13 +67,21 @@ export class EnemyManager {
    *  The rest are returned already rolled — same elites, same affixes — for the
    *  director to release later. Pacing must not cost the room its elites. */
   spawnRoom(rng, floor, roomIndex, arena, mods, eliteCount, firstWave = Infinity) {
-    const roster = rollRoster(rng, floor, roomIndex, mods);
+    // rollRoster decides HOW MANY and scales that with depth - it is the tested
+    // authority on room size. foeRoster knows the new archetypes but returns a
+    // fixed count, which flattened every room to two enemies. So take the size
+    // from one and the variety from the other: substitute newcomers into a
+    // correctly sized roster.
+    const base = rollRoster(rng, floor, roomIndex, mods);
+    const pool = foeRoster(rng, floor, roomIndex).filter((id) => EXTRA_FOES[id]);
+    const roster = base.map((id) => (pool.length && rng.chance(0.3) ? rng.pick(pool) : id));
     const swarmHp = mods.swarm ? 0.5 : 1;
     const deferred = [];
     roster.forEach((id, i) => {
       const elite = i < eliteCount;
       const affix = elite ? rollAffix(rng, floor) : null;
-      const data = scaleEnemy(id, floor, roomIndex, affix);
+      const data = EXTRA_FOES[id] ? scaleFoe(id, floor, roomIndex) : scaleEnemy(id, floor, roomIndex, affix);
+      if (EXTRA_FOES[id] && affix) data.affix = affix;
       data.hp = Math.max(1, Math.round(data.hp * swarmHp)); data.maxHp = data.hp;
       // spawn ring away from the player at origin
       const ang = rng.next() * Math.PI * 2, rad = 9 + rng.next() * 8;
@@ -212,7 +230,7 @@ export class EnemyManager {
         continue;
       }
 
-      switch (e.archetype) {
+      switch (BEHAVIOUR[e.archetype] ?? e.archetype) {
         case "skitter": {                                            // swarm melee, jittery
           const jit = Math.sin(e.t * 9) * 0.6;
           this._move(e, (nx - nz * jit * 0.4) * spd, (nz + nx * jit * 0.4) * spd, dt, arena);
