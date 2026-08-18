@@ -46,10 +46,15 @@ export class WeaponView {
     function cyl(r1, r2, h, m, x, y, z) { const mm = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 10), m); mm.rotation.x = Math.PI / 2; mm.position.set(x, y, z); return mm; }
   }
 
+  /** Weapon magazine plus any `magazine` bonus from items and synergies. */
+  capacity(weapon = this.weapon) {
+    return Math.max(1, Math.round((weapon?.stats?.magSize ?? 1) + (this.playerStats?.magazine ?? 0)));
+  }
+
   equip(weapon) {
     this.weapon = weapon;
     this._build(weapon.archetype);
-    this.mag = weapon.stats.magSize; this.reloading = false; this.reloadT = 0; this.heat = 0; this.overheated = false;
+    this.mag = this.capacity(weapon); this.reloading = false; this.reloadT = 0; this.heat = 0; this.overheated = false;
     this.shotIndex = 0;
   }
 
@@ -63,7 +68,7 @@ export class WeaponView {
   startReload(stats) {
     if (this.reloading || this.isBeam) return false;
     if (stats.noReload) return false;
-    if (this.mag >= this.weapon.stats.magSize) return false;
+    if (this.mag >= this.capacity()) return false;
     this.reloading = true; this.reloadT = 0; SFX.reload();
     return true;
   }
@@ -78,7 +83,7 @@ export class WeaponView {
     if (this.reloading) {
       this.reloadT += dt;
       const t = (w.reloadTime ?? 1.2) / (stats.reloadMult ?? 1);
-      if (this.reloadT >= t) { this.reloading = false; this.mag = w.magSize; SFX.reloadDone(); this.shotIndex = 0; this.freshMag = true; }
+      if (this.reloadT >= t) { this.reloading = false; this.mag = this.capacity(); SFX.reloadDone(); this.shotIndex = 0; this.freshMag = true; }
       return null;
     }
     if (this.isBeam) {

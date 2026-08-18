@@ -126,6 +126,7 @@
     .wstats .d { text-align: right; font-weight: 700; }
     .wstats .d.up { color: #6cff9a; } .wstats .d.down { color: #ff6b6b; } .wstats .d.same { color: var(--dim); }
     #weaponOffer .held { opacity: .55; }
+    #synLine{position:absolute;left:calc(14px + var(--safe-l, 0px));bottom:calc(64px + var(--safe-b, 0px));font-size:11px;letter-spacing:.14em;color:#6cff9a;opacity:.8;text-shadow:0 0 10px rgba(108,255,154,.35);pointer-events:none}
     .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
     .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
     #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
@@ -172,6 +173,7 @@
     <div id="bossbar" class="hidden"><div id="bossName">THE CUSTODIAN</div><div class="track"><div id="bossFill"></div></div></div>
     <div id="ammo"><span id="ammoText">12</span><small id="weaponName">SIDEARM</small></div>
     <div id="goldLine"><span id="goldNum">0</span> &#164;</div>
+    <div id="synLine"></div>
     <div id="toast"></div>
     <div id="touch">
       <div id="joy"><i></i></div>

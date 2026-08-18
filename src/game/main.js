@@ -19,6 +19,7 @@ import { rollChallenge, checkChallenge } from "core/challenges.js";
 import { layoutDressing, PROP_KINDS } from "core/dressing.js";
 import { rollStock, buy, rerollStock, REROLL_COST } from "core/shop.js";
 import { BOONS, rollPact, acceptPact, refusePact } from "core/pact.js";
+import { activeSynergies, synergyEffects } from "core/synergy.js";
 import { computeStats, BASE_STATS } from "core/stats.js";
 
 import { createRenderer, buildArena, buildDressing, COLORS } from "./renderer.js";
@@ -248,10 +249,11 @@ function enterBoss() {
   data.hp = b.hp; data.maxHp = b.hp; data.damage *= 1.6; data.name = b.name;
   const boss = enemies.spawn(data, 0, -8, true);
   boss.mesh.scale.multiplyScalar(1.7); boss.radius *= 1.7; boss.isBoss = true;
+  boss.restScale = boss.mesh.scale.x;      // anim reads this as the rest pose
   // Choreography: core/bosspatterns.js picks the attacks, enemies.js performs them.
   boss.bossId = b.id; boss.rng = seedRng.fork("attacks"); boss.baseScale = boss.mesh.scale.x;
   boss.atkCd = 1.8;                       // a beat to breathe before the first tell
-  if (b.id === "chorus") { for (const dx of [-5, 5]) { const m = scaleEnemy("sentinel", r.floor, 4, null); m.hp = Math.round(b.hp * 0.35); m.maxHp = m.hp; const e = enemies.spawn(m, dx, -9, true); e.mesh.scale.multiplyScalar(1.2); e.radius *= 1.2; e.isBossAdd = true; } }
+  if (b.id === "chorus") { for (const dx of [-5, 5]) { const m = scaleEnemy("sentinel", r.floor, 4, null); m.hp = Math.round(b.hp * 0.35); m.maxHp = m.hp; const e = enemies.spawn(m, dx, -9, true); e.mesh.scale.multiplyScalar(1.2); e.radius *= 1.2; e.isBossAdd = true; e.restScale = e.mesh.scale.x; } }
   G.boss = boss; G.bossMode = true; G.roomActive = true; G.roomCleared = false; G.roomTimer = 0;
   $("#roomNum").textContent = "BOSS"; $("#modName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`;
   $("#bossName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`; $("#bossFill").style.width = "100%"; $("#bossbar").classList.remove("hidden");
@@ -275,7 +277,18 @@ function addGold(n) {
 function recomputeStats() {
   const items = (G.run.held ?? []).map((id) => ITEM_BY_ID[id]).filter(Boolean);
   const boonObjs = (G.run.boons ?? []).map((id) => BOONS[id]).filter(Boolean).map((b) => ({ effects: b.effects }));
-  const stats = computeStats(BASE_STATS, [...items, ...boonObjs]);
+  const combos = activeSynergies(G.run.held ?? []);
+  const synObj = combos.length ? [{ effects: synergyEffects(G.run.held ?? []) }] : [];
+  const stats = computeStats(BASE_STATS, [...items, ...boonObjs, ...synObj]);
+  // Announce anything that just completed.
+  const known = G.synergiesSeen ?? (G.synergiesSeen = []);
+  for (const s of combos) {
+    if (known.includes(s.id)) continue;
+    known.push(s.id);
+    toast(`SYNERGY — ${s.name.toUpperCase()} · ${s.desc}`, false, 3200);
+    SFX.roomClear();
+  }
+  G.synergies = combos;
   const oldMax = G.run.maxHp ?? stats.maxHp;
   const newMax = stats.maxHp;
   G.run = { ...G.run, stats, maxHp: newMax };
@@ -286,7 +299,11 @@ function recomputeStats() {
 
 function applyStats() {
   const s = G.run.stats;
-  player.setStats({ moveSpeed: s.moveSpeed, jumps: s.jumps ?? 1, dashCooldown: G.mods.noDash ? 9999 : (s.dashCooldown ?? 1.4), gravity: (s.gravity ?? 1) * (G.mods.lowGravity ? 0.45 : 1), airControl: s.airControl ? 1 : 0.35, dashPhases: !!s.dashPhases, slide: !!s.slide });
+  weaponView.playerStats = s;      // capacity() reads s.magazine
+  player.setStats({ moveSpeed: s.moveSpeed,
+    // The Double Jump item grants `extraJump: true`, but nothing ever turned
+    // that into a jump count, so the item did literally nothing until now.
+    jumps: (s.jumps ?? 1) + (s.extraJump ? 1 : 0), dashCooldown: G.mods.noDash ? 9999 : (s.dashCooldown ?? 1.4), gravity: (s.gravity ?? 1) * (G.mods.lowGravity ? 0.45 : 1), airControl: s.airControl ? 1 : 0.35, dashPhases: !!s.dashPhases, slide: !!s.slide });
 }
 
 function onRoomCleared() {
@@ -365,7 +382,9 @@ function afterReward(index) {
   const before = G.run.maxHp;
   G.run = takeReward(G.run, index);
   G.hp = Math.min(G.run.maxHp, G.hp + Math.max(0, G.run.maxHp - before));
-  applyStats(); renderItems();
+  // takeReward recomputes from held items only; it cannot see boons or synergies.
+  // Recompute again so an item that just completed a combo actually applies it.
+  recomputeStats();
   if (G.run.phase === "door") openDoors();
   else if (G.run.phase === "boss") enterBoss();
 }
@@ -565,7 +584,15 @@ function endRun(kind) {
   if (meta.newlyUnlocked.length) toast("UNLOCKED — " + meta.newlyUnlocked.map((id) => UNLOCKS[id].name).join(" · "), false, 3600);
 }
 
+function renderSynergyLine() {
+  const el = $("#synLine");
+  if (!el) return;
+  const c = G.synergies ?? [];
+  el.textContent = c.length ? c.map((s) => s.name.toUpperCase()).join(" · ") : "";
+}
+
 function renderItems() {
+  renderSynergyLine();
   const wrap = $("#items"); wrap.innerHTML = "";
   const counts = {};
   for (const id of G.run.held) counts[id] = (counts[id] ?? 0) + 1;

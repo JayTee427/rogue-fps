@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { scaleEnemy, rollRoster, rollAffix } from "core/enemies.js";
 import { tickStatuses } from "core/combat.js";
 import { nextAttack } from "core/bosspatterns.js";
+import { gaitPose, windupPose, flinchPose, deathPose } from "core/anim.js";
 import { COLORS } from "./renderer.js";
 import { SFX } from "./audio.js";
 
@@ -41,13 +42,15 @@ export class EnemyManager {
     this.projectiles = [];   // enemy shots: { mesh, vel, dmg, ttl }
     this.shards = [];        // death debris
     this.pending = [];       // events raised outside update(), drained next frame
+    this.dying = [];         // meshes mid-collapse, removed when deathPose says done
   }
 
   clear() {
     for (const e of this.list) this.group.remove(e.mesh);
     for (const p of this.projectiles) this.group.remove(p.mesh);
     for (const sh of this.shards) this.group.remove(sh.m);
-    this.list = []; this.projectiles = []; this.shards = [];
+    for (const d of this.dying) this.group.remove(d.m);
+    this.list = []; this.projectiles = []; this.shards = []; this.dying = [];
   }
 
   /** Build the room's full roster, but only place the first `firstWave` of them.
@@ -141,6 +144,7 @@ export class EnemyManager {
     this.group.add(mesh);
     const e = {
       ...data, mesh, statuses: [], elite, alive: true,
+      baseY: mesh.position.y, restScale: mesh.scale.x,   // the pose is an offset from these
       t: Math.random() * 10, cd: 1 + Math.random(), state: "seek", stateT: 0, beepT: 0,
       radius: look.size * 0.6, hitFlash: 0, regenT: 0,
     };
@@ -155,6 +159,7 @@ export class EnemyManager {
     const events = this.pending;
     this.pending = [];
     this._updateShards(dt);
+    this._updateCollapse(dt);
     const pp = player.pos;
     for (const e of this.list) {
       if (!e.alive) continue;
@@ -166,6 +171,18 @@ export class EnemyManager {
         if (r.killed) { this._kill(e, events); continue; }
       } else e.slowMult = 1;
       if (e.regen) { e.regenT += dt; if (e.regenT > 1) { e.regenT = 0; e.hp = Math.min(e.maxHp, e.hp + e.regen); } }
+      // --- locomotion ---------------------------------------------------
+      // Enemies used to slide rigidly. gaitPose is pure maths over time and
+      // speed; it returns an offset from the rest pose captured at spawn.
+      const gspd = (e.lastStep ?? 0) / Math.max(dt, 1e-4);
+      const pose = gaitPose(e.archetype, e.t, gspd);
+      const rs = e.restScale ?? 1;
+      const fl = flinchPose(e.hitFlash > 0 ? 0.08 - e.hitFlash : 99);
+      // `m` is declared further down the loop body, so reach through e.mesh here.
+      e.mesh.position.y = (e.baseY ?? e.mesh.position.y) + pose.bodyY + fl.offset;
+      e.mesh.scale.set(rs * pose.scaleXZ, rs * pose.scaleY * fl.scale, rs * pose.scaleXZ);
+      e.pose = pose;
+
       // Keep the affix ring pinned to the floor. It is parented to a mesh that
       // bobs, floats and scales during windups, so its local offset has to be
       // recomputed rather than set once.
@@ -199,7 +216,7 @@ export class EnemyManager {
         case "skitter": {                                            // swarm melee, jittery
           const jit = Math.sin(e.t * 9) * 0.6;
           this._move(e, (nx - nz * jit * 0.4) * spd, (nz + nx * jit * 0.4) * spd, dt, arena);
-          m.rotation.y += dt * 6; m.position.y = LOOKS.skitter.y + Math.abs(Math.sin(e.t * 12)) * 0.15;
+          m.rotation.y += dt * 6;                        // bob comes from the gait
           e.voiceT = (e.voiceT ?? Math.random() * 1.5) - dt; if (e.voiceT <= 0 && dist < 14) { SFX.skitterChitter(); e.voiceT = 1.2 + Math.random() * 1.6; }
           if (dist < 1.3 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 0.8; }
           break;
@@ -249,7 +266,8 @@ export class EnemyManager {
           const tx = pp.x + Math.cos(orbit) * 7, tz = pp.z + Math.sin(orbit) * 7;
           const ox = tx - m.position.x, oz = tz - m.position.z, od = Math.hypot(ox, oz) || 1;
           this._move(e, ox / od * spd, oz / od * spd, dt, arena);
-          m.position.y = LOOKS.wisp.y + Math.sin(e.t * 3) * 0.6; m.rotation.y += dt * 2; m.rotation.x += dt * 1.3;
+          m.position.y += Math.sin(e.t * 3) * 0.35;      // adds to the gait, does not replace it
+          m.rotation.y += dt * 2; m.rotation.x += dt * 1.3;
           e.voiceT = (e.voiceT ?? Math.random()) - dt; if (e.voiceT <= 0 && dist < 16) { SFX.wispWhine(); e.voiceT = 1.8 + Math.random(); }
           if (e.cd <= 0) {
             // The design promises the Wisp DROPS MINES. Alternate: mine, shot, mine.
@@ -315,7 +333,11 @@ export class EnemyManager {
       case "windup":
         m.material.emissive.setHex(0xff2010);
         m.material.emissiveIntensity = 0.8 + (e.atkT / e.atk.windup) * 3.2;
-        m.scale.setScalar((e.baseScale ?? 1) * (1 + Math.sin(e.atkT * 26) * 0.05));
+        // Pull back before the strike - the wind-up has to be readable as motion,
+        // not only as a colour.
+        const wu = windupPose(e.atkT / Math.max(e.atk.windup, 1e-4));
+        m.scale.setScalar((e.baseScale ?? 1) * wu.scale * (1 + Math.sin(e.atkT * 26) * 0.04));
+        m.rotation.x = wu.lean * 0.35;
         e.atkT += dt;
         if (e.atkT >= e.atk.windup) {
           e.atkState = "active"; e.atkT = 0;
@@ -391,13 +413,19 @@ export class EnemyManager {
     e.mesh.material.emissiveIntensity = e.elite ? 1.0 : 0.7;
   }
 
+  /** Collapse the mesh over ~0.35s instead of blinking it out of existence. */
+  _startCollapse(e) {
+    const m = e.mesh, rs = e.restScale ?? 1;
+    this.dying.push({ m, t: 0, rs });
+  }
+
   _kill(e, events, silent = false) {
     if (!e.alive) return;
     // Shooting a popper must set it off too — a dead bomb that doesn't explode
     // reads as a bug, and it removes the whole "shoot it at range" decision.
     if (e.archetype === "popper" && !e._boom && events) { this._detonate(e, events, 0); return; }
     e.alive = false;
-    this.group.remove(e.mesh);
+    this._startCollapse(e);
     if (!silent) SFX.kill();
     if (events) events.push({ type: "kill", e });
     this._shatter(e);
@@ -408,6 +436,7 @@ export class EnemyManager {
         const child = this.spawn({ ...e, affix: null, hp: Math.max(1, Math.round(e.maxHp * 0.35)), maxHp: Math.max(1, Math.round(e.maxHp * 0.35)), damage: e.damage * 0.6, speed: e.speed * 1.3 },
           e.mesh.position.x + off, e.mesh.position.z, false);
         child.isSplit = true; child.mesh.scale.multiplyScalar(0.65); child.radius *= 0.65;
+        child.restScale = child.mesh.scale.x;
       }
     }
   }
@@ -427,6 +456,17 @@ export class EnemyManager {
       this.group.add(m);
       const vel = m.position.clone().sub(src.position).normalize().multiplyScalar(4 + Math.random() * 6); vel.y += 3 + Math.random() * 4;
       this.shards.push({ m, vel, spin: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4), life: 0.9 + Math.random() * 0.5, max: 1.2 });
+    }
+  }
+
+  _updateCollapse(dt) {
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const d = this.dying[i];
+      d.t += dt / 0.35;
+      const p = deathPose(d.t);
+      d.m.scale.setScalar(Math.max(0.001, d.rs * p.scale));
+      d.m.rotation.z += dt * 4;
+      if (p.done || d.t >= 1) { this.group.remove(d.m); this.dying.splice(i, 1); }
     }
   }
 
