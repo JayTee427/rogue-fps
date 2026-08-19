@@ -53,6 +53,13 @@ export class EnemyManager {
     this.shards = [];        // death debris
     this.pending = [];       // events raised outside update(), drained next frame
     this.dying = [];         // meshes mid-collapse, removed when deathPose says done
+    // At most this many melee enemies may be committed to a lunge at once.
+    // Without it, six skitters all reach you and all bite, which reads as
+    // being chewed rather than being fought.
+    this.lungers = new Set();
+    // Two attackers took turns but often struck in the same frame, which lands
+    // as one big hit rather than two readable ones. Space them out.
+    this.lungeGap = 0;
   }
 
   clear() {
@@ -61,6 +68,7 @@ export class EnemyManager {
     for (const sh of this.shards) this.group.remove(sh.m);
     for (const d of this.dying) this.group.remove(d.m);
     this.list = []; this.projectiles = []; this.shards = []; this.dying = [];
+    this.lungers.clear();
   }
 
   /** Build the room's full roster, but only place the first `firstWave` of them.
@@ -111,6 +119,19 @@ export class EnemyManager {
     });
     return { roster, deferred };
   }
+
+  /** Melee enemies take turns. Two attackers is a fight; six is a blender. */
+  _claimLunge(e, max = 2) {
+    if (this.lungers.has(e)) return true;
+    if (this.lungeGap > 0) return false;
+    for (const other of this.lungers) if (!other.alive) this.lungers.delete(other);
+    if (this.lungers.size >= max) return false;
+    this.lungers.add(e);
+    this.lungeGap = 0.55;      // the next attacker waits its turn
+    return true;
+  }
+
+  _releaseLunge(e) { this.lungers.delete(e); }
 
   /** Place one enemy the director held back. */
   spawnDeferred(d) { return this.spawn(d.data, d.x, d.z, d.elite); }
@@ -184,6 +205,7 @@ export class EnemyManager {
       baseY: mesh.position.y, restScale: mesh.scale.x,   // the pose is an offset from these
       t: Math.random() * 10, cd: 1 + Math.random(), state: "seek", stateT: 0, beepT: 0,
       radius: look.size * 0.6, hitFlash: 0, regenT: 0,
+      spawnPhase: Math.random() * Math.PI * 2,   // so a group does not orbit in lockstep
     };
     this.list.push(e);
     return e;
@@ -195,6 +217,7 @@ export class EnemyManager {
   update(dt, player, arena, playerStats) {
     const events = this.pending;
     this.pending = [];
+    this.lungeGap = Math.max(0, this.lungeGap - dt);
     this._updateShards(dt);
     this._updateCollapse(dt);
     const pp = player.pos;
@@ -250,12 +273,44 @@ export class EnemyManager {
       }
 
       switch (BEHAVIOUR[e.archetype] ?? e.archetype) {
-        case "skitter": {                                            // swarm melee, jittery
+        case "skitter": {
+          // Circle, commit to a telegraphed lunge, fall back. The rhythm is the
+          // point: a wind-up you can see means a strike you can sidestep, and a
+          // retreat means the room breathes between attacks.
+          e.mstate ??= "stalk"; e.mt = (e.mt ?? 0) + dt;
           const jit = Math.sin(e.t * 9) * 0.6;
-          this._move(e, (nx - nz * jit * 0.4) * spd, (nz + nx * jit * 0.4) * spd, dt, arena);
-          m.rotation.y += dt * 6;                        // bob comes from the gait
-          e.voiceT = (e.voiceT ?? Math.random() * 1.5) - dt; if (e.voiceT <= 0 && dist < 14) { playAt(m.position, () => SFX.skitterChitter()); e.voiceT = 1.2 + Math.random() * 1.6; }
-          if (dist < 1.3 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 0.8; }
+          m.rotation.y += dt * 6;
+          e.voiceT = (e.voiceT ?? Math.random() * 1.5) - dt;
+          if (e.voiceT <= 0 && dist < 14) { playAt(m.position, () => SFX.skitterChitter()); e.voiceT = 1.2 + Math.random() * 1.6; }
+
+          if (e.mstate === "stalk") {
+            // Hold a ring around the player rather than piling onto them.
+            const want = dist > 6.5 ? 1 : dist < 3.4 ? -0.7 : 0;
+            const strafe = Math.sin(e.t * 1.7 + (e.spawnPhase ?? 0)) * 0.9;
+            this._move(e, (nx * want - nz * strafe) * spd, (nz * want + nx * strafe) * spd, dt, arena);
+            if (dist < 7 && e.mt > 0.5 && this._claimLunge(e)) { e.mstate = "windup"; e.mt = 0; }
+          } else if (e.mstate === "windup") {
+            // Rear back and glow. This is the tell; without it the strike is
+            // indistinguishable from simply being near the thing.
+            this._move(e, -nx * spd * 0.5, -nz * spd * 0.5, dt, arena);
+            m.material.emissive.setHex(0xff3a1a);
+            m.material.emissiveIntensity = 0.8 + Math.min(3.4, e.mt * 9);
+            m.scale.setScalar((e.restScale ?? 1) * (1 + Math.sin(e.mt * 30) * 0.14));
+            if (e.mt > 0.42) { e.mstate = "lunge"; e.mt = 0; e.lungeDir = { x: nx, z: nz }; e.lungeHit = false; this._restoreGlow(e); }
+          } else if (e.mstate === "lunge") {
+            // Committed: it drives in a straight line and cannot re-aim, so
+            // stepping aside actually works.
+            this._move(e, e.lungeDir.x * spd * 3.1, e.lungeDir.z * spd * 3.1, dt, arena);
+            if (!e.lungeHit && dist < 1.7) {
+              e.lungeHit = true;
+              events.push({ type: "hitPlayer", dmg: e.damage, src: e });
+            }
+            if (e.mt > 0.32) { e.mstate = "recover"; e.mt = 0; }
+          } else {
+            // Back off and give the player the room back.
+            this._move(e, (-nx * 0.9 - nz * jit * 0.3) * spd, (-nz * 0.9 + nx * jit * 0.3) * spd, dt, arena);
+            if (e.mt > 1.15) { e.mstate = "stalk"; e.mt = 0; this._releaseLunge(e); }
+          }
           break;
         }
         case "sentinel": {                                           // hold 9–14m, aim, then fire a tracer
@@ -462,6 +517,7 @@ export class EnemyManager {
     // reads as a bug, and it removes the whole "shoot it at range" decision.
     if (e.archetype === "popper" && !e._boom && events) { this._detonate(e, events, 0); return; }
     e.alive = false;
+    this._releaseLunge(e);
     this._startCollapse(e);
     if (!silent) SFX.kill();
     if (events) events.push({ type: "kill", e });
