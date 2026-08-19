@@ -41,7 +41,14 @@ export function log(type, data = {}) {
 export function startRun(seed, meta = {}) {
   if (!ON) return;
   runId = `${Date.now().toString(36)}`;
-  log("run_start", { seed, ...meta });
+  log("run_start", {
+    seed, ...meta,
+    // When aiming dies but WASD works, these four fields say why.
+    touchMode: document.body.classList.contains("touch"),
+    coarse: matchMedia("(pointer: coarse)").matches,
+    anyFine: matchMedia("(any-pointer: fine)").matches,
+    maxTouch: navigator.maxTouchPoints,
+  });
 }
 
 /** Flush immediately - used when a run ends, so nothing is lost. */

@@ -35,7 +35,11 @@ describe("biomePalette", () => {
       }
       expect(p.fogDensity).toBeGreaterThan(0);
       expect(p.fogDensity).toBeLessThan(0.5);
-      expect(p.lightIntensity).toBeGreaterThan(0);
+      // lightIntensity used to be asserted here. It was read by nothing - the
+      // test checked that the field existed, never that anything consumed it,
+      // which is the same blind spot that let four undefined palette keys ship.
+      // Per-biome light levels are worth having, but they need to be added
+      // together with the brightness measurement in arena-palette.test.js.
     }
   });
 

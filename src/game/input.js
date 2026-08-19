@@ -8,7 +8,17 @@ export class Input {
     this.state = { x: 0, y: 0, jump: false, dash: false, crouch: false, fire: false, reload: false, _jumpHeld: false, _dashHeld: false };
     this.look = { dx: 0, dy: 0 };
     this.locked = false;
-    this.isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+    // How someone is *playing*, not what the device claims it can do.
+    // `"ontouchstart" in window` is true on any Windows box with a digitizer,
+    // and latching on it drops a desktop into touch mode - which gates mouse
+    // look off and, because poll() skips the keyboard there, movement too.
+    // A machine with a fine pointer available is a mouse machine until
+    // someone actually touches the screen; real events correct it both ways.
+    this.isTouch = matchMedia("(pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches;
+    this._lastTouchAt = 0;
+    // Set while the game wants the pointer captured, kept separate from
+    // `locked` so a refused request stays *wanted* and stays visible.
+    this.wantLock = false;
     this.mouseSens = 0.0022;
     this.touchSens = 0.0045;
     this.keys = new Set();
@@ -18,26 +28,54 @@ export class Input {
     if (this.isTouch) document.body.classList.add("touch");
     this._bindKeyboard();
     this._bindMouse();
-    if (this.isTouch) this._bindTouch(hud);
+    this._bindTouch(hud);          // touch listeners only; inert under a mouse
+    this._bindModeSwitch();
   }
 
-  /** Chrome refuses a re-lock for about a second after one is exited, and the
-   *  rejection is silent. Retrying once on a short delay turns "click a bunch of
-   *  times and eventually it starts" into one click that works. */
+  /** Ask for the pointer. Chrome refuses this whenever the request did not come
+   *  from a user gesture, and for about a second after the player pressed Esc -
+   *  both silently. The previous retry-on-a-timer could never have worked: a
+   *  timer callback carries no gesture, so Chrome refuses it for the very same
+   *  reason. The *want* is recorded instead, `lockLost` makes it visible, and
+   *  the player next click on the canvas satisfies it inside a real gesture. */
   requestLock() {
+    this.wantLock = true;
     if (this.isTouch || this.locked) return;
-    // Wrapped: in iframes and some emulated environments the request throws or
-    // rejects asynchronously; neither should ever surface as an error.
-    const attempt = () => {
-      try {
-        const p = this.canvas.requestPointerLock?.();
-        if (p && p.catch) p.catch(() => { if (!this._retried) { this._retried = true; setTimeout(attempt, 900); } });
-      } catch { /* unavailable */ }
-    };
-    this._retried = false;
-    attempt();
+    try {
+      const p = this.canvas.requestPointerLock?.();
+      if (p && p.catch) p.catch(() => {});   // stays wanted; the next click retries
+    } catch { /* unavailable in iframes and some emulated environments */ }
   }
-  releaseLock() { if (this.locked) document.exitPointerLock?.(); }
+
+  releaseLock() {
+    this.wantLock = false;
+    if (this.locked) document.exitPointerLock?.();
+  }
+
+  /** The game wants mouse look and does not have it. This is the state that
+   *  stranded a player with working WASD, dead aim and no explanation. */
+  get lockLost() { return this.wantLock && !this.locked && !this.isTouch; }
+
+  /** Whoever actually touches the glass or moves a mouse picks the scheme. */
+  _setTouch(on) {
+    if (this.isTouch === on) return;
+    this.isTouch = on;
+    document.body.classList.toggle("touch", on);
+    this.look.dx = 0; this.look.dy = 0;
+    this.state.x = 0; this.state.y = 0;
+  }
+
+  _bindModeSwitch() {
+    window.addEventListener("touchstart", () => {
+      this._lastTouchAt = performance.now();
+      this._setTouch(true);
+    }, { passive: true, capture: true });
+    // A tap synthesises a mouse event a moment later. Ignoring that echo stops
+    // every tap on a phone from flipping the game back to mouse controls.
+    const byMouse = () => { if (performance.now() - this._lastTouchAt > 900) this._setTouch(false); };
+    window.addEventListener("mousedown", byMouse, { capture: true });
+    window.addEventListener("mousemove", (e) => { if (e.movementX || e.movementY) byMouse(); }, { capture: true });
+  }
 
   _bindKeyboard() {
     const map = { KeyW: "f", KeyS: "b", KeyA: "l", KeyD: "r", ArrowUp: "f", ArrowDown: "b", ArrowLeft: "l", ArrowRight: "r" };
@@ -67,7 +105,8 @@ export class Input {
   }
 
   _bindTouch(hud) {
-    const joy = hud.querySelector("#joy"), knob = joy.querySelector("i");
+    const joy = hud.querySelector("#joy"), knob = joy?.querySelector("i");
+    if (!joy || !knob) return;      // bound unconditionally now, so tolerate a HUD without them
     const R = 48;
     let joyId = null, joyCx = 0, joyCy = 0, lookId = null, lastX = 0, lastY = 0;
     const setKnob = (dx, dy) => { knob.style.transform = `translate(${dx}px, ${dy}px)`; };

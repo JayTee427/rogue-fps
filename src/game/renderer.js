@@ -152,9 +152,13 @@ const PALETTES = [
  */
 export function buildArena(scene, rng, opts = {}) {
   const halfW = opts.halfW ?? 16, halfD = opts.halfD ?? 20;
-  const pal = opts.palette ?? rng.pick(PALETTES);
+  // Merged over a complete palette, never replaced by one. buildArena reads
+  // seven keys; a caller forwarding five used to leave four materials with
+  // `color: undefined`, which THREE quietly renders white.
+  const pal = opts.palette ? { ...PALETTES[0], ...opts.palette } : rng.pick(PALETTES);
   // A biome palette carries its own atmosphere; the built-in ones do not.
   if (opts.fogDensity != null && scene.fog) scene.fog.density = opts.fogDensity;
+  if (opts.fogColor != null && scene.fog) scene.fog.color.setHex(opts.fogColor);
   const g = new THREE.Group();
   g.name = "arena";
 

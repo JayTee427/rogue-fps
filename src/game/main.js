@@ -348,8 +348,11 @@ function enterRoom() {
   G.biome = biomeId;
   G.arena = buildArena(scene, seedRng.fork("arena"), {
     halfW: bl.halfW, halfD: bl.halfD, blockCount: bl.blockCount,
-    palette: { floor: bp.floor, wall: bp.wall, trim: bp.trim, accent: bp.accent, sky: bp.sky },
+    // Forward the whole biome palette. Cherry-picking keys here is what left
+    // floorSeam, panel, block and blockTop undefined - four white materials a room.
+    palette: bp,
     fogDensity: biomeFog(bp.fogDensity),
+    fogColor: bp.fog,
   });
   player.arena = G.arena;
   player.reset(0, G.arena.halfD - 4);
@@ -396,7 +399,9 @@ function enterRoom() {
   music?.setBoss(false);
   G.roomTimer = G.mods.timePressure ? 60 : 0;
   G.shield = r.stats.roomShield ?? 0;
-  scene.fog.density = G.mods.darkness ? 0.11 : biomeFog(biomePalette(G.biome ?? "").fogDensity);
+  // Darkness should read as oppressive, not as a black screen: 0.11 fogged
+  // out 99% of a 20m sightline.
+  scene.fog.density = G.mods.darkness ? 0.042 : biomeFog(biomePalette(G.biome ?? "").fogDensity);
   $("#floorNum").textContent = `FLOOR ${r.floor}`;
   $("#biomeName").textContent = (BIOMES[G.biome]?.name ?? "").toUpperCase();
   $("#roomNum").textContent = r.roomIndex >= 4 ? "ROOM 5/5 · BOSS NEXT" : `ROOM ${r.roomIndex + 1}/5`;
@@ -447,12 +452,14 @@ function enterBoss() {
   weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
 }
 
-/** Biome fog is a 0..0.5 "how thick" rating; the game plays between 0.022 and
- *  0.075, with 0.11 reserved for the darkness modifier. Map one onto the other so
- *  a hull walk still reads clearer than a reactor without going opaque. */
+/** Biome fog is a 0..0.4 "how thick" rating; the game plays between 0.013 and
+ *  0.030, with 0.042 reserved for the darkness modifier. Map one onto the other
+ *  so a hull walk still reads clearer than a reactor without going opaque. */
 function biomeFog(v) {
+  // Arenas run to 60m across, so density has to leave the far wall visible.
+  // The old 0.022-0.075 band put every biome under the black-void floor.
   const t = Math.max(0, Math.min(1, (Number.isFinite(v) ? v : 0.1) / 0.4));
-  return 0.022 + t * 0.053;
+  return 0.013 + t * 0.017;
 }
 
 function addGold(n) {
@@ -1163,8 +1170,14 @@ function frameBody(now) {
 
   const { s, look } = input.poll();
   if (G.run && $("#hud") && !$("#hud").classList.contains("hidden")) {
-    const sens = input.isTouch ? input.mouseSens : input.mouseSens;
-    if (input.locked || input.isTouch) player.look(look.dx, look.dy, sens);
+    // Losing the pointer is silent and, until now, unexplained. Say it on
+    // screen and record it, so a run that goes wrong reports which it was.
+    if (input.lockLost !== G._lockLost) {
+      G._lockLost = input.lockLost;
+      $("#aimlost").classList.toggle("hidden", !input.lockLost);
+      tlog("pointer_lock", { lost: input.lockLost, touch: input.isTouch });
+    }
+    if (input.locked || input.isTouch) player.look(look.dx, look.dy, input.mouseSens);
     player.update(dt, s);
     if (player.dashed) { SFX.dash(); fx.dash(new THREE.Vector3(player.pos.x, 0.6, player.pos.z)); } if (player.jumped) SFX.jump();
     if (s.reload) weaponView.startReload(G.run.stats);

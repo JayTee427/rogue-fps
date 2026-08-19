@@ -34,55 +34,35 @@ export const BIOMES = {
 };
 
 const PALETTES = {
+  // "Stacked containers sweat rust in the dark." Industrial steel, rust glow.
   cargo: {
-    floor: 0x444444,
-    wall: 0x222222,
-    trim: 0x666666,
-    fog: 0x111111,
-    sky: 0x0a0a0a,
-    accent: 0x888888,
-    fogDensity: 0.25,
-    lightIntensity: 0.6,
+    floor: 0x3a3a40, floorSeam: 0xff9a3c, wall: 0x4a4a52, panel: 0x5c5c66,
+    block: 0x605e64, blockTop: 0x96928c, trim: 0xffb04a,
+    fog: 0x241f1a, sky: 0x1a1712, accent: 0xff8c32, fogDensity: 0.25,
   },
+  // "Coolant leaks glow faintly under broken grates." Toxic green.
   reactor: {
-    floor: 0x1a1a2e,
-    wall: 0x16213e,
-    trim: 0x0f3460,
-    fog: 0x0d1b2a,
-    sky: 0x0a0f1a,
-    accent: 0x533460,
-    fogDensity: 0.35,
-    lightIntensity: 0.4,
+    floor: 0x28423a, floorSeam: 0x4affc0, wall: 0x35544a, panel: 0x42665a,
+    block: 0x467060, blockTop: 0x74a894, trim: 0x3affaa,
+    fog: 0x122820, sky: 0x0a1a16, accent: 0x2fffa0, fogDensity: 0.35,
   },
+  // "Bunks still hold shapes that aren't quite human." Warm, domestic, wrong.
   quarters: {
-    floor: 0x3d2b1f,
-    wall: 0x2c1e10,
-    trim: 0x5d4b3f,
-    fog: 0x1a1208,
-    sky: 0x0f0a04,
-    accent: 0x7d6b5f,
-    fogDensity: 0.2,
-    lightIntensity: 0.5,
+    floor: 0x453a30, floorSeam: 0xffc06a, wall: 0x584a3c, panel: 0x6b5c4a,
+    block: 0x70604e, blockTop: 0xa8927a, trim: 0xffaa55,
+    fog: 0x251c14, sky: 0x1c1410, accent: 0xffb866, fogDensity: 0.2,
   },
+  // "Stars burn through the gaps in the plating." Cold steel and starlight.
   hull: {
-    floor: 0x333333,
-    wall: 0x111111,
-    trim: 0x555555,
-    fog: 0x000000,
-    sky: 0x000022,
-    accent: 0x999999,
-    fogDensity: 0.1,
-    lightIntensity: 0.8,
+    floor: 0x323c4c, floorSeam: 0x7ad4ff, wall: 0x424e62, panel: 0x526078,
+    block: 0x566480, blockTop: 0x8c9cb8, trim: 0x9ae0ff,
+    fog: 0x0c1420, sky: 0x05070e, accent: 0x6ac8ff, fogDensity: 0.1,
   },
+  // "Glass tubes crack, spilling silence." Pale growth gone to seed.
   hydro: {
-    floor: 0x0a2a0a,
-    wall: 0x051a05,
-    trim: 0x1a4a1a,
-    fog: 0x030803,
-    sky: 0x020402,
-    accent: 0x2a6a2a,
-    fogDensity: 0.3,
-    lightIntensity: 0.45,
+    floor: 0x323f2c, floorSeam: 0xa8ff6a, wall: 0x42523a, panel: 0x526548,
+    block: 0x566a4c, blockTop: 0x8ca878, trim: 0xc0ff7a,
+    fog: 0x141e10, sky: 0x0e1608, accent: 0x9aff5a, fogDensity: 0.3,
   },
 };
 
