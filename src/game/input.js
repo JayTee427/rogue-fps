@@ -21,11 +21,21 @@ export class Input {
     if (this.isTouch) this._bindTouch(hud);
   }
 
+  /** Chrome refuses a re-lock for about a second after one is exited, and the
+   *  rejection is silent. Retrying once on a short delay turns "click a bunch of
+   *  times and eventually it starts" into one click that works. */
   requestLock() {
     if (this.isTouch || this.locked) return;
     // Wrapped: in iframes and some emulated environments the request throws or
     // rejects asynchronously; neither should ever surface as an error.
-    try { const p = this.canvas.requestPointerLock?.(); if (p && p.catch) p.catch(() => {}); } catch { /* unavailable */ }
+    const attempt = () => {
+      try {
+        const p = this.canvas.requestPointerLock?.();
+        if (p && p.catch) p.catch(() => { if (!this._retried) { this._retried = true; setTimeout(attempt, 900); } });
+      } catch { /* unavailable */ }
+    };
+    this._retried = false;
+    attempt();
   }
   releaseLock() { if (this.locked) document.exitPointerLock?.(); }
 

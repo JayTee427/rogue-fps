@@ -217,6 +217,7 @@ export class EnemyManager {
   update(dt, player, arena, playerStats) {
     const events = this.pending;
     this.pending = [];
+    this._playerPos = player?.pos ?? null;   // _move keeps bodies out of it
     this.lungeGap = Math.max(0, this.lungeGap - dt);
     this._updateShards(dt);
     this._updateCollapse(dt);
@@ -469,6 +470,24 @@ export class EnemyManager {
       const px = b.w / 2 + e.radius - Math.abs(dx), pz = b.d / 2 + e.radius - Math.abs(dz);
       if (px > 0 && pz > 0) { if (px < pz) m.position.x += Math.sign(dx || 1) * px; else m.position.z += Math.sign(dz || 1) * pz; }
     }
+    // Never occupy the camera. Without this a lunge ends with the mesh centred
+    // on the player's eye and the screen fills with unlit backfaces - which is
+    // exactly what a black moving square in the middle of the view is.
+    const pp = this._playerPos;
+    if (pp) {
+      const pdx = m.position.x - pp.x, pdz = m.position.z - pp.z;
+      const pd = Math.hypot(pdx, pdz);
+      const keep = 1.15 + (e.radius ?? 0.5) * 0.5;
+      if (pd < keep) {
+        const push = keep - pd;
+        if (pd > 0.001) { m.position.x += (pdx / pd) * push; m.position.z += (pdz / pd) * push; }
+        else { m.position.x += keep; }              // exactly co-located: shove it aside
+        // A committed lunge that has arrived is spent; let it recover rather than
+        // grinding against the player for the rest of its dash.
+        if (e.mstate === "lunge") { e.mstate = "recover"; e.mt = 0; }
+      }
+    }
+
     // separation from other enemies
     for (const o of this.list) {
       if (o === e || !o.alive) continue;
