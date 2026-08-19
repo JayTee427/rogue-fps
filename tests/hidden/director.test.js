@@ -167,3 +167,21 @@ describe("updateSkill", () => {
     expect(perf).toEqual(copy);
   });
 });
+
+describe("first-room wave split survives every wave count", () => {
+  it("a 3-enemy opener never crashes and never loses an enemy", () => {
+    // n=3 rolls a single wave on a coin flip, and the first-room cap then
+    // overflows into waves[1] - which did not exist. Half of all new runs
+    // crashed at first spawn, silently, from the moment the room-1 roster was
+    // trimmed to three. Sweep seeds so both branches are exercised.
+    for (let seed = 1; seed <= 60; seed++) {
+      const plan = planEncounter(rng(seed).fork("director"), {
+        floor: 1, roomIndex: 0, roster: ["skitter", "skitter", "sentinel"], skill: 0.5,
+      });
+      const all = plan.waves.flatMap((w) => w.ids);
+      expect(all.length, `seed ${seed} lost enemies`).toBe(3);
+      // the cap itself: no opener wave larger than ceil(n/2)
+      expect(plan.waves[0].ids.length, `seed ${seed} dumped the roster`).toBeLessThanOrEqual(2);
+    }
+  });
+});

@@ -38,9 +38,15 @@ function splitWaves(rng, roster, skill, firstRoom) {
   }
 
   if (firstRoom) {
+    // The opener must not dump the whole roster at once. A three-enemy first
+    // room can roll a single wave, and the overflow then needs somewhere to
+    // go - reading waves[1] without creating it crashed half of all new runs
+    // at the first spawn, silently, from the moment the room-1 roster was
+    // trimmed to three.
     const cap = Math.ceil(n / 2);
     if (waves[0].ids.length > cap) {
       const overflow = waves[0].ids.splice(cap);
+      if (!waves[1]) waves.push({ delay: 0, ids: [] });
       waves[1].ids = overflow.concat(waves[1].ids);
     }
   }
