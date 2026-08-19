@@ -1,5 +1,6 @@
 import { rng } from "core/rng.js";
 import { ITEM_BY_ID } from "core/items.js";
+import { BOONS } from "core/pact.js";
 import { computeStats, BASE_STATS } from "core/stats.js";
 import { draftRewards } from "core/draft.js";
 import { generateFloor } from "core/floor.js";
@@ -71,11 +72,24 @@ export function takeReward(run, index) {
     throw new Error("takeReward: invalid index");
   }
   const item = run.draft[index];
-  const held = [...run.held, item.id];
+  let held = [...run.held, item.id];
+  // Curse of Forgetfulness: taking it costs a random possession. Seeded off
+  // the run so the same draft forgets the same item on the same seed.
+  let forgotten = null;
+  if (item.effects?.loseRandomItem && run.held.length > 0) {
+    const forget = rng(run.seed).fork(`forget${run.floor}-${run.roomIndex}`);
+    forgotten = run.held[forget.int(0, run.held.length - 1)];
+    const keep = [...run.held];
+    keep.splice(keep.indexOf(forgotten), 1);
+    held = [...keep, item.id];
+  }
   // ITEMS is an array; indexing it by id silently yields undefined for every
   // item and every effect vanishes. The map is ITEM_BY_ID.
   const itemObjs = held.map((id) => ITEM_BY_ID[id]).filter(Boolean);
-  const newStats = computeStats(BASE_STATS, itemObjs);
+  // Pact boons live on run.boons and must survive a core-side recompute, or
+  // taking any item would silently strip every bargain already made.
+  const boonObjs = (run.boons ?? []).map((id) => BOONS[id]).filter(Boolean).map((b) => ({ effects: b.effects }));
+  const newStats = computeStats(BASE_STATS, [...itemObjs, ...boonObjs]);
   const oldMax = run.maxHp;
   const newMax = newStats.maxHp;
   const hp = Math.min(newMax, run.hp + (newMax - oldMax));
@@ -86,6 +100,7 @@ export function takeReward(run, index) {
     maxHp: newMax,
     hp,
     draft: [],
+    lastForgotten: forgotten,     // for the shell to announce, then clear
     phase: run.roomIndex >= 4 ? "boss" : "door",
   };
 }

@@ -73,11 +73,10 @@ export const ARCHETYPES = {
 };
 
 export const WEAPON_MODS = {
-  ricochet: { name: "Ricochet", effects: { ricochet: true } },
   pierce: { name: "Pierce", effects: { pierce: { add: 1 } } },
-  incendiary: { name: "Incendiary", effects: { fireDamage: { add: 5 }, ignite: true } },
-  cryo: { name: "Cryo", effects: { iceDamage: { add: 5 }, slow: { add: 0.3 } } },
-  chain_lightning: { name: "Chain Lightning", effects: { shockDamage: { add: 8 }, chain: { add: 2 } } },
+  incendiary: { name: "Incendiary", effects: { onHitBurn: { add: 2 } } },
+  cryo: { name: "Cryo", effects: { onHitSlow: { add: 0.35 } } },
+  chain_lightning: { name: "Chain Lightning", effects: { chainEveryN: { add: 4 } } },
   lifesteal: { name: "Lifesteal", effects: { lifesteal: { add: 0.1 } } },
   big_mag: { name: "Big Mag", effects: { magSize: { mul: 1.5 } } },
   fast_reload: { name: "Fast Reload", effects: { reloadTime: { mul: 0.6 } } },
@@ -85,11 +84,11 @@ export const WEAPON_MODS = {
   crit_damage: { name: "Critical Damage", effects: { critMult: { add: 0.5 } } },
   tight_spread: { name: "Tight Spread", effects: { spread: { mul: 0.5 } } },
   hollow_point: { name: "Hollow Point", effects: { damage: { mul: 1.2 }, magSize: { mul: 0.8 } } },
-  stabilizer: { name: "Stabilizer", effects: { recoil: { mul: 0.7 }, spread: { mul: 0.8 } } },
-  extended_barrel: { name: "Extended Barrel", effects: { projSpeed: { mul: 1.3 }, damage: { add: 3 } } },
+  stabilizer: { name: "Stabilizer", effects: { spread: { mul: 0.7 } } },
+  extended_barrel: { name: "Extended Barrel", effects: { damage: { add: 3 }, spread: { mul: 0.85 } } },
   quickdraw: { name: "Quickdraw", effects: { fireRate: { mul: 1.15 }, reloadTime: { mul: 0.85 } } },
   armor_piercing: { name: "Armor Piercing", effects: { pierce: { add: 2 }, damage: { mul: 1.1 } } },
-  volatile: { name: "Volatile", effects: { splashRadius: { add: 1 }, selfDamage: { mul: 1.5 } } }
+  volatile: { name: "Volatile", effects: { damage: { mul: 1.25 }, selfDamage: { add: 0.03 } } }
 };
 
 export function applyMods(stats, modIds) {

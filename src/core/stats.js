@@ -3,56 +3,70 @@ import { ITEMS } from "core/items.js";
 
 export const BASE_STATS = {
   // NOTE: this table was once 113 entries long, the tail of it an anatomical
-  // word list with no relationship to the game - a generation that ran on and
-  // was never read by anything. Keep it to stats the code actually consumes;
-  // tests/integration/stats-hygiene.test.js fails if unused keys creep back in.
+  // word list no code ever read. It crept back once already, because the guard
+  // matched bare words and comments contain words. The guard now requires a
+  // dotted read (`stats.key` style) outside the producer files, and
+  // core/registry.js requires every key an item/weapon/synergy/pact declares
+  // to appear here or in a HANDLED list. Add a key only with its consumer.
+
+  // -- combat core --------------------------------------------------------
   maxHp: 100,
-  damage: 1,
+  damage: 1,             // multiplier on the weapon's damage
   fireRate: 1,
-  moveSpeed: 8,
   critChance: 0.05,
   critMult: 2,
   spread: 1,
-  // Read by draft.js on every reward roll. They MUST default here: an absent
-  // stat arrives as undefined, `undefined * x` is NaN, and every rarity weight
-  // going NaN collapsed floor-1 drafts to legendaries only. (Integration test
-  // tests/integration/draft-from-run.test.js pins this.)
-  draftSize: 3,
+  pierce: 0,
+  lifesteal: 0,          // fraction of damage dealt returned as health
+  magazine: 0,           // bonus rounds on top of the weapon's magSize
+  reloadMult: 1,
+  noReload: false,
+  freeShotChance: 0,
+  firstShotMult: 0,
+  lastShotMult: 0,
+  everyNthDouble: 0,
+  chainEveryN: 0,        // every Nth hit chains lightning
+  blackHoleEveryN: 0,    // every Nth shot opens a singularity
+  selfDamage: 0,         // fraction of damage dealt taken as burn (soulfire)
+  teleportOnHit: 0,      // chance per hit to tear the target elsewhere
+
+  // -- on-hit statuses (consumed by combat.resolveHit) --------------------
+  onHitBurn: 0,
+  onHitSlow: 0,
+  executeBelow: 0,
+
+  // -- defence ------------------------------------------------------------
+  armor: 0,
+  deflect: 0,
+  thorns: 0,
+  regen: 0,
+  roomShield: 0,
+  damageOnMeleeHit: 0,
+  stillDamageTaken: 0,   // multiplier on damage taken while standing still
+  noHeal: false,
+  secondWind: false,
+  floorRetry: false,
+
+  // -- movement (read through the player-stats adapter in main.js) --------
+  moveSpeed: 8,
+  jumps: 1,
+  extraJump: false,
+  gravity: 1,
+  airControl: false,
+  slide: false,
+  dashCooldown: 1.4,
+  dashPhases: false,
+  shortTeleport: 0,
+  teleportOnDodge: 0,
+  dashOnKill: false,
+
+  // -- kills and economy --------------------------------------------------
+  healOnKill: 0,
+  onKillExplode: 0,
+  gravityWell: 0,
+  draftSize: 3,          // must default here: absent -> NaN rarity weights
   luck: 0,
   rarityShift: 0,
-  armor: 0,
-  magazine: 0,        // bonus rounds added to the weapon's magazine
-  reload: 1,
-  range: 100,
-  lifesteal: 0,
-  regen: 0,
-  deflect: 0,
-  pierce: 0,
-  explode: 0,
-  burn: 0,
-  ricochet: 0,
-  burst: 0,
-  auto: false,
-  energy: 0,
-  heat: 0,
-  recoil: 0,
-  sway: 0,
-  weight: 0,
-  value: 0,
-  rarity: 0,
-  level: 0,
-  gold: 0,
-  score: 0,
-  kills: 0,
-  combo: 0,
-  accuracy: 0,
-  headshot: 0,
-  head: 0,
-  hand: 0,
-  foot: 0,
-  skin: 0,
-  nose: 0,
-  eye: 0,
 };
 
 export function computeStats(base, held) {

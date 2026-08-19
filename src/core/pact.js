@@ -13,7 +13,7 @@ export const BOONS = {
     id: "iron",
     name: "Ironhide",
     desc: "Your skin turns to steel.",
-    effects: { defense: { mul: 1.4 } },
+    effects: { armor: { add: 8 } },
   },
   vigor: {
     id: "vigor",
@@ -25,13 +25,13 @@ export const BOONS = {
     id: "swift",
     name: "Swiftness",
     desc: "Move like the wind.",
-    effects: { speed: { mul: 1.25 } },
+    effects: { moveSpeed: { mul: 1.25 } },
   },
-  arcane: {
-    id: "arcane",
-    name: "Arcane Might",
-    desc: "Spells crackle with deadly force.",
-    effects: { spellPower: { mul: 1.35 } },
+  overcharge: {
+    id: "overcharge",
+    name: "Overcharge",
+    desc: "Your weapon cycles past its rated limit.",
+    effects: { fireRate: { mul: 1.2 } },
   },
 };
 
@@ -55,8 +55,10 @@ export function acceptPact(run, pact) {
   return {
     ...run,
     held,
-    boon: pact.boon,
-    effects: BOONS[pact.boon].effects,
+    // Onto the list recomputeStats actually reads. The old shape stored
+    // `boon`/`effects`, which nothing consumed: every pact in the game
+    // collected its curse and paid out nothing.
+    boons: [...(run.boons ?? []), pact.boon],
   };
 }
 

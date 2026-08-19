@@ -18,7 +18,9 @@ function allSource() {
     for (const f of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, f.name);
       if (f.isDirectory()) walk(p);
-      else if (f.name.endsWith(".js") && f.name !== "stats.js") out += readFileSync(p, "utf-8");
+      // Producers GRANT effects; a mention there proves nothing about
+      // consumption, so they are excluded from the read-evidence scan.
+      else if (f.name.endsWith(".js") && !["stats.js", "items.js", "synergy.js", "weapons.js", "pact.js", "meta.js", "registry.js"].includes(f.name)) out += readFileSync(p, "utf-8");
     }
   };
   walk(SRC);
@@ -31,8 +33,12 @@ describe("BASE_STATS hygiene", () => {
   });
 
   it("every stat is actually read somewhere in the game", () => {
+    // A DOTTED read. The bare-word scan this replaces was satisfied by the
+    // word "head" in a comment, which kept six anatomy keys alive for weeks
+    // after they were supposedly purged. effect-registry.test.js runs the
+    // same closure from the registry side.
     const src = allSource();
-    const orphans = Object.keys(BASE_STATS).filter((k) => !new RegExp(`\\b${k}\\b`).test(src));
+    const orphans = Object.keys(BASE_STATS).filter((k) => !new RegExp(`\.${k}\\b`).test(src));
     expect(orphans, `these stats are defined but never read: ${orphans.join(", ")}`).toEqual([]);
   });
 

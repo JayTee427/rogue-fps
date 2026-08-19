@@ -62,7 +62,8 @@ describe("weapons — mods", () => {
   });
 
   it("the design's named mods exist", () => {
-    for (const id of ["ricochet", "pierce", "incendiary", "cryo", "chain_lightning", "lifesteal", "big_mag", "fast_reload", "crit_chance", "crit_damage", "tight_spread"]) {
+    // ricochet is gone: it rolled a key with no bounce mechanic behind it.
+    for (const id of ["pierce", "incendiary", "cryo", "chain_lightning", "lifesteal", "big_mag", "fast_reload", "crit_chance", "crit_damage", "tight_spread"]) {
       expect(WEAPON_MODS[id], id).toBeDefined();
     }
   });
@@ -175,8 +176,15 @@ describe("applyMods", () => {
     expect(base.magSize).toBe(10);
   });
 
-  it("flag mods surface as true", () => {
-    expect(applyMods({ damage: 1 }, ["ricochet"]).ricochet).toBe(true);
+  it("no shipped mod carries a dead key (flags included)", () => {
+    // The old flag mod was ricochet: true - a key nothing read. Every mod's
+    // keys now have to be part of the registered vocabulary, so this asserts
+    // the mods table carries no `true` flags without a consumer.
+    for (const [id, m] of Object.entries(WEAPON_MODS)) {
+      for (const [k, v] of Object.entries(m.effects)) {
+        expect(v === true || typeof v === "object", `${id}.${k}`).toBe(true);
+      }
+    }
   });
 
   it("empty mods is identity", () => {

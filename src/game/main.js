@@ -612,6 +612,11 @@ function describe(it) {
 function afterReward(index) {
   const before = G.run.maxHp;
   G.run = takeReward(G.run, index);
+  if (G.run.lastForgotten) {
+    const lost = ITEM_BY_ID[G.run.lastForgotten]?.name ?? G.run.lastForgotten;
+    setTimeout(() => toast(`FORGOTTEN — ${lost} is gone`, true, 3000), 400);
+    G.run = { ...G.run, lastForgotten: null };
+  }
   G.hp = Math.min(G.run.maxHp, G.hp + Math.max(0, G.run.maxHp - before));
   // takeReward recomputes from held items only; it cannot see boons or synergies.
   // Recompute again so an item that just completed a combo actually applies it.
@@ -1024,13 +1029,13 @@ function fire(want, dt) {
   const origin = _o.copy(player.pos);
   const pierce = (s.pierce ?? 0) + (r.weapon.stats.pierce ?? 0);
   let anyHit = false;
+  let selfBurn = 0;                      // soulfire/volatile: dealt damage that recoils
   for (const ray of shot.rays) {
     const hits = enemies.raycast(origin, ray.dir, 120, pierce >= 99 ? 50 : pierce);
     _end.copy(origin).addScaledVector(ray.dir, hits.length ? hits[hits.length - 1].t : 60);
     if (!shot.beam || G.roomRng.next() < 0.5) weaponView.spawnTracer(origin.clone().add(new THREE.Vector3(0.2, -0.15, 0)), _end.clone(), shot.beam ? COLORS.accent2 : 0xffd080, shot.beam ? 0.05 : 0.025, shot.beam ? 0.05 : 0.08);
     for (const h of hits) {
       if (h.blocked) { toast("BLOCKED", true, 500); continue; }
-      const stats = { ...s, damage: s.damage * (r.weapon.stats.damage ?? 1) / (r.weapon.stats.damage ? 1 : 1) };
       // player stats.damage is a multiplier on the weapon's damage
       const combined = { ...s, damage: (r.weapon.stats.damage ?? 10) * (r.stats.damage ?? 1) * (shot.dmgMult ?? 1),
         critChance: Math.min(1, (s.critChance ?? 0) + (G.critBonus ?? 0)) };
@@ -1046,6 +1051,17 @@ function fire(want, dt) {
       if (hitFx.lifestealHp > 0) heal(hitFx.lifestealHp);
       const killed = enemies.damage(h.e, res.damage, res.hpAfter, res.killed);
       anyHit = true;
+      selfBurn += res.damage * (combined.selfDamage ?? 0);
+      // Abyssal Step: a strike can tear the target somewhere else. The
+      // ENEMY moves, never the camera - yanking the player's view mid-aim
+      // would read as a bug, not a power.
+      if (!res.killed && (combined.teleportOnHit ?? 0) > 0 && G.roomRng.next() < combined.teleportOnHit) {
+        const em = h.e.mesh, ang = G.roomRng.next() * Math.PI * 2, hop = 3 + G.roomRng.next() * 2;
+        fx.dash(em.position.clone());
+        em.position.x = Math.max(-(G.arena.halfW - 1), Math.min(G.arena.halfW - 1, em.position.x + Math.cos(ang) * hop));
+        em.position.z = Math.max(-(G.arena.halfD - 1), Math.min(G.arena.halfD - 1, em.position.z + Math.sin(ang) * hop));
+        fx.dash(em.position.clone());
+      }
       const hitPos = origin.clone().addScaledVector(ray.dir, h.t);
       fx.hit(hitPos, ray.dir, res.crit);
       fx.number(res.damage, h.e.mesh.position, res.crit ? "crit" : "hit", h.e.mesh.uuid);
@@ -1073,6 +1089,7 @@ function fire(want, dt) {
     }
   }
   if (anyHit) { $("#crosshair").classList.add("hit"); setTimeout(() => $("#crosshair").classList.remove("hit"), 70); }
+  if (selfBurn > 0) damagePlayer(selfBurn, "selfDamage");
 }
 
 function onKill(e, res) {
@@ -1519,6 +1536,12 @@ document.addEventListener("touchstart", () => { initAudio(); resumeAudio(); }, {
 // dev hooks — only when ?dev is in the URL. Lets the loop be driven from the
 // console for verification without touching gameplay code paths.
 if (new URLSearchParams(location.search).has("dev")) {
+  // The registry guard runs in CI; running it here too means a hot-reload with
+  // a typo'd effect key says so in the console instead of shipping silence.
+  import("core/registry.js").then(async ({ auditAll }) => {
+    const bad = await auditAll();
+    for (const f of bad) console.error(`[registry] ${f.source}/${f.id} declares unknown effect key "${f.key}"`);
+  }).catch(() => {});
   window.__hs = {
     G, enemies, player, fx, hazards, renderer, scene, camera, THREE,
     scaleEnemy, rollWeapon,

@@ -79,12 +79,15 @@ describe("rollPact", () => {
 });
 
 describe("acceptPact", () => {
-  it("adds the curse to held and returns the boon's effects", () => {
+  it("adds the curse to held and the boon where recomputeStats reads it", () => {
     const p = rollPact(R(4), run());
     const res = acceptPact(run(), p);
     expect(res.held).toContain(p.curse);
-    expect(res.boon).toBe(p.boon);
-    expect(typeof res.effects).toBe("object");
+    // `boons` (plural), the list the stat recompute actually consumes. The old
+    // shape stored `boon`/`effects`, which nothing read: every pact charged
+    // its curse and paid nothing.
+    expect(res.boons).toContain(p.boon);
+    expect(res.effects).toBeUndefined();
   });
 
   it("never mutates the run it was given", () => {

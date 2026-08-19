@@ -6,7 +6,7 @@ export const SYNERGIES = {
     name: "Fire Storm",
     desc: "Hot Rounds + Ignition + Shrapnel: incendiary cascade.",
     requires: ["hot_rounds", "ignition", "shrapnel"],
-    effects: { burn: { add: 2 }, damage: { mul: 1.2 } }
+    effects: { onHitBurn: { add: 2 }, damage: { mul: 1.2 } }
   },
   crit_machine: {
     id: "crit_machine",
@@ -20,7 +20,7 @@ export const SYNERGIES = {
     name: "Bullet Hose",
     desc: "Overclock + Bottomless + Infinite Mag: never stop firing.",
     requires: ["overclock", "bottomless", "infinite_mag"],
-    effects: { fireRate: { mul: 1.25 }, magazine: { add: 30 }, auto: true }
+    effects: { fireRate: { mul: 1.25 }, magazine: { add: 30 }, noReload: true }
   },
   tank: {
     id: "tank",
@@ -41,28 +41,28 @@ export const SYNERGIES = {
     name: "Ricochet Kit",
     desc: "Ricochet Plate + Punch Through + Chain Reaction: bounce and break.",
     requires: ["ricochet_plate", "punch_through", "chain_reaction"],
-    effects: { ricochet: { add: 1 }, pierce: { add: 2 }, explode: { add: 1 } }
+    effects: { chainEveryN: { add: 3 }, pierce: { add: 2 }, onKillExplode: { add: 0.3 } }
   },
   economy_engine: {
     id: "economy_engine",
     name: "Economy Engine",
     desc: "Lucky Coin + Greed + Magpie: wealth magnet.",
     requires: ["lucky_coin", "greed", "magpie"],
-    effects: { gold: { mul: 1.3 }, luck: { add: 0.1 }, value: { mul: 1.1 } }
+    effects: { luck: { add: 0.2 }, draftSize: { add: 1 } }
   },
   execution_squad: {
     id: "execution_squad",
     name: "Execution Squad",
     desc: "Executioner + First Blood + Doombringer: reap the weak.",
     requires: ["executioner", "first_blood", "doombringer"],
-    effects: { damage: { mul: 1.25 }, headshot: { mul: 1.5 }, kills: { add: 1 } }
+    effects: { damage: { mul: 1.25 }, executeBelow: { add: 0.12 }, critMult: { add: 0.5 } }
   },
   salvage_ops: {
     id: "salvage_ops",
     name: "Salvage Ops",
     desc: "Cartographer + Skeleton Key + Treasure Hunter: find everything.",
     requires: ["cartographer", "skeleton_key", "treasure_hunter"],
-    effects: { rarityShift: { add: 1 }, luck: { add: 0.05 }, score: { mul: 1.1 } }
+    effects: { rarityShift: { add: 1 }, luck: { add: 0.15 } }
   },
   cursed_freedom: {
     id: "cursed_freedom",

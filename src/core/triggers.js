@@ -13,7 +13,6 @@ export const HANDLED = [
   "firstShotCrit",
   "goldLossOnHit",
   "killHeal",
-  "lifeSteal",
   "lightningOnCrit",
   "meleeCounter",
   "phaseThroughWalls",
@@ -72,9 +71,6 @@ export function onEnemyHit(held, ctx) {
   }
   if (has(held, "burnSpreads") > 0) {
     burnSpread = true;
-  }
-  if (has(held, "lifeSteal") > 0) {
-    lifestealHp = damage * 0.1;
   }
   if (has(held, "voidDamage") > 0) {
     lifestealHp += damage * 0.1;
