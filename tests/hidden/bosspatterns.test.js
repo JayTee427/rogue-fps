@@ -3,7 +3,7 @@ import { rng } from "core/rng.js";
 import { BOSS_PATTERNS, ATTACK_SHAPES, bossPhase, nextAttack, telegraphFor, normAngle, angleCrossed } from "core/bosspatterns.js";
 
 const R = (s = 9) => rng(s);
-const BOSSES = ["custodian", "chorus", "landlord"];
+const BOSSES = ["custodian", "chorus", "landlord", "gardener"];
 
 describe("ATTACK_SHAPES", () => {
   it("names at least 4 distinct shapes, each with a duration and a tell", () => {
@@ -46,9 +46,9 @@ describe("BOSS_PATTERNS", () => {
     }
   });
 
-  it("the three bosses do not share an identical attack set", () => {
+  it("no two bosses share an identical attack set", () => {
     const sets = BOSSES.map(b => JSON.stringify(BOSS_PATTERNS[b].phases.flatMap(p => [...p.attacks].sort())));
-    expect(new Set(sets).size).toBe(3);
+    expect(new Set(sets).size).toBe(BOSSES.length);
   });
 });
 

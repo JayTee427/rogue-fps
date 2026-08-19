@@ -12,7 +12,8 @@ export const HAZARD_TAGS = ["lava_floor", "turrets", "mines", "acid_pools", "col
 export const BOSSES = {
   custodian: { name: "The Custodian", hp: 1200 },
   chorus: { name: "Chorus", hp: 900 },
-  landlord: { name: "The Landlord", hp: 1500 }
+  landlord: { name: "The Landlord", hp: 1500 },
+  gardener: { name: "The Gardener", hp: 1400 }
 };
 
 const AFFIXES = ["armoured", "hasty", "regenerating", "explosive", "shielded"];

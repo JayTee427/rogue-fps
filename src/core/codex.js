@@ -102,6 +102,7 @@ export const BOSS_LORE = {
   custodian: "It kept the station spotless for nine years after the last crew died. You are the mess.",
   chorus: "Fifty distress calls, one voice. It has been answering itself for a long time.",
   landlord: "It collects what the station is owed. The station is owed everything.",
+  gardener: "It tended the crops until the crops learned to tend themselves. It has not stopped tending.",
 };
 
 // The line the report screen shows for how you died, keyed by the damage-why

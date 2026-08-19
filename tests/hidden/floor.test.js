@@ -17,8 +17,8 @@ describe("floor — content tables", () => {
     for (const t of HAZARD_TAGS) expect(typeof t).toBe("string");
   });
 
-  it("defines the three bosses", () => {
-    expect(Object.keys(BOSSES).sort()).toEqual(["chorus", "custodian", "landlord"]);
+  it("defines the roster of bosses", () => {
+    expect(Object.keys(BOSSES).sort()).toEqual(["chorus", "custodian", "gardener", "landlord"]);
     for (const b of Object.values(BOSSES)) {
       expect(typeof b.name).toBe("string");
       expect(typeof b.hp).toBe("number");

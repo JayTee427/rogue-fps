@@ -261,7 +261,7 @@ function enterBoss() {
   player.arena = G.arena; player.reset(0, 14); player.yaw = 0; player.pitch = 0;
   enemies.clear(); hazards.clear();
   // boss = a big elite of a fitting archetype with the floor's affix, hp from floor data
-  const arch = { custodian: "warden", chorus: "sentinel", landlord: "brute" }[b.id] ?? "brute";
+  const arch = { custodian: "warden", chorus: "sentinel", landlord: "brute", gardener: "wisp" }[b.id] ?? "brute";
   const data = scaleEnemy(arch, r.floor, 4, b.affix);
   data.hp = b.hp; data.maxHp = b.hp; data.damage *= 1.6; data.name = b.name;
   const boss = enemies.spawn(data, 0, -8, true);

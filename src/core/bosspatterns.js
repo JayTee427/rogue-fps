@@ -47,6 +47,16 @@ export const ATTACK_SHAPES = {
 };
 
 export const BOSS_PATTERNS = {
+  // Area denial: it doesn't chase you, it makes everywhere you want to stand
+  // wrong. Spores and mortars own the ground; the beam arrives late to punish
+  // whoever learned to stand still.
+  gardener: {
+    phases: [
+      { attacks: ["spore_cloud", "mortar_volley"], cooldown: 4.5 },
+      { attacks: ["spore_cloud", "mortar_volley", "summon_adds"], cooldown: 3.2 },
+      { attacks: ["spore_cloud", "mortar_volley", "summon_adds", "sweep_beam"], cooldown: 2.2 }
+    ]
+  },
   custodian: {
     phases: [
       { attacks: ["sweep_beam", "shockwave"], cooldown: 4.0 },
