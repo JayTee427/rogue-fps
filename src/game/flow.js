@@ -163,6 +163,7 @@ function enterRoom() {
   G.roomRng = seedRng;
   G.mods = { swarm: room.modifier === "swarm", noDash: room.modifier === "no_dash", lowGravity: room.modifier === "low_gravity", darkness: room.modifier === "darkness", timePressure: room.modifier === "time_pressure" };
   G.arena?.dispose();
+  G.clearedAt = null;
   clearBossTell(); clearBeamSweep();
   // Each floor gets its own biome: its own palette, fog and room proportions.
   const biomeId = pickBiome(makeRng(r.seed).fork(`biome${r.floor}`), r.floor);
@@ -256,6 +257,7 @@ function enterBoss() {
   const b = r.currentFloor.boss;
   const seedRng = makeRng(r.seed).fork(`boss${r.floor}`);
   G.arena?.dispose();
+  G.clearedAt = null;
   clearBossTell(); clearBeamSweep();
   G.arena = buildArena(scene, seedRng.fork("arena"), { blockCount: 4, halfW: 18, halfD: 18 });
   player.arena = G.arena; player.reset(0, 14); player.yaw = 0; player.pitch = 0;
@@ -367,7 +369,8 @@ function onRoomCleared() {
     else G.pendingBonusItem = won.rewardAmount;   // consumed by the next draft
   }
   SFX.roomClear();
-  toast("ROOM CLEAR — reach the exit");
+  G.clearedAt = performance.now();
+  toast("ROOM CLEAR — reach the glowing green pillar", false, 2800);
   G.arena.exit.material.opacity = 0.75;
 }
 

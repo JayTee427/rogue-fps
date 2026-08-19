@@ -260,7 +260,16 @@ export function buildArena(scene, rng, opts = {}) {
   for (let i = 0; i < n; i++) {
     const w = rng.int(2, 4), d = rng.int(2, 4), h = rng.pick([1.2, 1.8, 2.6, 3.4]);
     const x = rng.int(-halfW + 3, halfW - 3), z = rng.int(-halfD + 6, halfD - 6);
-    if (Math.hypot(x, z) < 5) continue;                                  // keep spawn clear
+    if (Math.hypot(x, z) < 5) continue;                    // keep the centre open
+    // Keep the SPAWN and the EXIT approachable: this check used to guard only
+    // the origin, where nobody spawns and nothing exits. A block sitting on
+    // the exit pad makes a cleared room unleavable.
+    const keepClear = [{ px: 0, pz: halfD - 4 }, { px: 0, pz: -halfD + 3 }];
+    const buried = keepClear.some(({ px, pz }) => {
+      const nx = Math.max(Math.abs(px - x) - w / 2, 0), nz = Math.max(Math.abs(pz - z) - d / 2, 0);
+      return Math.hypot(nx, nz) < 2.4;
+    });
+    if (buried) continue;
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), blockMat);
     m.position.set(x, h / 2, z); m.castShadow = true; m.receiveShadow = true;
     g.add(m);
@@ -282,6 +291,16 @@ export function buildArena(scene, rng, opts = {}) {
   exitRing.rotation.x = Math.PI / 2; exitRing.position.copy(exit.position); exitRing.position.y = 0.14;
   exit.userData.ring = exitRing;
   g.add(exitRing);
+  // The beacon: hidden until the room clears, then a pillar of light that can
+  // be seen from anywhere in the arena, over any cover block.
+  const beacon = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.45, 0.7, 14, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: COLORS.exit, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  beacon.position.set(exit.position.x, 7, exit.position.z);
+  beacon.visible = false;
+  exit.userData.beacon = beacon;
+  g.add(beacon);
 
   scene.add(g);
   return { group: g, halfW, halfD, blocks, exit, exitPos: exit.position.clone(), dispose() { scene.remove(g); g.traverse(o => { o.geometry?.dispose(); }); } };

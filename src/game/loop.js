@@ -191,11 +191,26 @@ function frameBody(now) {
       music.setTarget((G.roomActive || G.bossMode) ? Math.max(0.35, threat * 0.7 + peril * 0.5) : 0.12, dt);
     }
 
+    // Corpses keep dying even after the fight is over.
+    if (!G.roomActive && !G.bossMode) enemies.tickFx(dt);
+
     // exit pad
     if (G.roomCleared && G.arena) {
       const d = Math.hypot(player.pos.x - G.arena.exitPos.x, player.pos.z - G.arena.exitPos.z);
       G.arena.exit.userData.ring.rotation.z += dt * 2;
-      if (d < 1.8) { G.roomCleared = false; if (G.bossMode) onBossDown(); else openDraft(); }
+      // The beacon: a pillar of light visible across the room and over cover.
+      // A dim floor decal announced by a 1.4-second toast stranded a player in
+      // a cleared room for twenty-one seconds.
+      const bc = G.arena.exit.userData.beacon;
+      if (bc) { bc.visible = true; bc.material.opacity = 0.35 + Math.sin(now / 300) * 0.15; }
+      if (d < 2.2) { G.roomCleared = false; if (bc) bc.visible = false; if (G.bossMode) onBossDown(); else openDraft(); }
+      // A cleared room without an exit for this long is either a lost player
+      // or a broken trigger; say the instruction again and write down which.
+      if (G.clearedAt && now - G.clearedAt > 15000) {
+        G.clearedAt = now;                          // re-arm, don't spam
+        toast("ROOM CLEAR — reach the glowing green pillar", true, 3200);
+        tlog("exit_stall", { d: Math.round(d * 10) / 10, px: Math.round(player.pos.x), pz: Math.round(player.pos.z), ex: Math.round(G.arena.exitPos.x), ez: Math.round(G.arena.exitPos.z) });
+      }
     }
     // hud
     if (G.bossMode && G.boss) { $("#bossFill").style.width = `${Math.max(0, G.boss.hp / G.boss.maxHp) * 100}%`; if (!G.boss.alive) $("#bossbar").classList.add("hidden"); }

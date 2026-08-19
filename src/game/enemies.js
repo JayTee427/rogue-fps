@@ -228,8 +228,7 @@ export class EnemyManager {
     this.pending = [];
     this._playerPos = player?.pos ?? null;   // _move keeps bodies out of it
     this.lungeGap = Math.max(0, this.lungeGap - dt);
-    this._updateShards(dt);
-    this._updateCollapse(dt);
+    this.tickFx(dt);
     const pp = player.pos;
     for (const e of this.list) {
       if (!e.alive) continue;
@@ -581,6 +580,15 @@ export class EnemyManager {
       const vel = m.position.clone().sub(src.position).normalize().multiplyScalar(4 + Math.random() * 6); vel.y += 3 + Math.random() * 4;
       this.shards.push({ m, vel, spin: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4), life: 0.9 + Math.random() * 0.5, max: 1.2 });
     }
+  }
+
+  /** Death debris and mid-collapse corpses, ticked every frame regardless of
+   *  room state. This used to live only inside update(), which stops the
+   *  moment a room clears - so the FINAL kill of every room froze mid-shrink
+   *  and stood there forever as a glowing statue. */
+  tickFx(dt) {
+    this._updateShards(dt);
+    this._updateCollapse(dt);
   }
 
   _updateCollapse(dt) {
