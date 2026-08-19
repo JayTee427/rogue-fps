@@ -39,8 +39,8 @@ import { FX } from "./fx.js";
 import { HazardView } from "./hazardView.js";
 import { TIERS } from "core/quality.js";
 import { chainTargets, singularityPull, explosionVictims } from "core/fxitems.js";
-import { applyRun, serializeProfile, deserializeProfile, profileSummary, UNLOCKS } from "core/meta.js";
-import { ACHIEVEMENTS, checkAchievements, newAchievementState, achievementProgress } from "core/achievements.js";
+import { ACHIEVEMENTS, checkAchievements, newAchievementState } from "core/achievements.js";
+import { newTable, qualifies, rank, addEntry, sanitizeInitials, serializeTable, deserializeTable, topLine, MAX_ENTRIES } from "core/hof.js";
 
 // ------------------------------------------------------------------ boot --
 const $ = (s) => document.querySelector(s);
@@ -67,12 +67,10 @@ const enemies = new EnemyManager(scene);
 const fx = new FX(scene, camera, TIERS[tierName]);
 const hazards = new HazardView(scene);
 let music = null;
-let profile = deserializeProfile(localStorage.getItem("hs_profile"));
-let achState = (() => {
-  try { const raw = JSON.parse(localStorage.getItem("hs_achievements") ?? "null");
-        return raw && Array.isArray(raw.earned) ? raw : newAchievementState(); }
-  catch { return newAchievementState(); }
-})();
+let hof = deserializeTable(localStorage.getItem("hs_hof"));
+// Achievements are earned WITHIN a run and travel with the score. Nothing
+// carries between players, because the next player is a stranger.
+let achState = newAchievementState();
 
 // ------------------------------------------------------------------ state --
 const G = {
@@ -85,7 +83,7 @@ const G = {
   passives: null, regenAcc: 0,
   // director: a running read on how well the player is doing, persisted so a
   // run starts where the last one left off rather than assuming average.
-  skill: Number(localStorage.getItem("hs_skill") ?? 0.5),
+  skill: 0.5,
   wavePlan: null, challenge: null, roomStats: null,
 };
 
@@ -156,45 +154,40 @@ function roomChallengeEnd() {
   return checkChallenge(ch, G.roomStats) ? ch : null;
 }
 
-function renderProgress() {
-  const p = achievementProgress(achState);
-  const ps = profileSummary(profile);
-  $("#progHead").textContent = `${ps.unlockedCount}/${ps.totalCount} unlocked · ${p.earned}/${p.total} achievements`;
 
-  const t = profile.totals ?? {};
-  $("#progTotals").innerHTML = [
-    ["runs", t.runs ?? 0], ["kills", t.kills ?? 0], ["best score", (t.bestScore ?? 0).toLocaleString()],
-    ["deepest floor", t.deepestFloor ?? 0], ["extractions", t.extractions ?? 0],
-  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join("");
 
-  const unl = $("#progUnlocks"); unl.innerHTML = "";
-  for (const id of Object.keys(UNLOCKS)) {
-    const u = UNLOCKS[id], have = (profile.unlocked ?? []).includes(id);
-    const el = document.createElement("div");
-    el.className = `prow ${have ? "have" : "locked"}`;
-    el.innerHTML = `<b>${have ? u.name : "???"}</b><span>${have ? u.desc : describeRequirement(u)}</span>`;
-    unl.appendChild(el);
-  }
-
-  const ach = $("#progAch"); ach.innerHTML = "";
-  for (const id of Object.keys(ACHIEVEMENTS)) {
-    const a = ACHIEVEMENTS[id], have = (achState.earned ?? []).includes(id);
-    const el = document.createElement("div");
-    el.className = `prow ${have ? "have" : "locked"} ${a.tier}`;
-    el.innerHTML = `<b>${a.name}</b><span>${a.desc}</span>`;
-    ach.appendChild(el);
-  }
+function commitEntry() {
+  if (!G.pendingEntry) return;
+  const initials = sanitizeInitials($("#initials")?.value);
+  hof = addEntry(hof, { ...G.pendingEntry, initials, at: Date.now() });
+  localStorage.setItem("hs_hof", serializeTable(hof));
+  G.pendingEntry = null;
+  $("#initialsRow").classList.add("hidden");
+  $("#repRank").textContent = `${initials} RECORDED`;
+  SFX.pickup();
+  renderHof();
 }
 
-/** What a locked unlock still wants, in words rather than a raw object. */
-function describeRequirement(u) {
-  const t = profile.totals ?? {};
-  const parts = Object.entries(u.requires ?? {});
-  const met = parts.every(([k, need]) => (t[k] ?? 0) >= need);
-  // Unlocks are granted when a run ENDS, so a satisfied requirement can sit here
-  // still locked. Saying "40/40" makes that look like a bug; say what happens next.
-  if (met && parts.length) return "earned — unlocks when your next run ends";
-  return parts.map(([k, need]) => `${k} ${Math.min(t[k] ?? 0, need)}/${need}`).join(" · ") || "keep playing";
+function renderHof() {
+  const wrap = $("#hofRows");
+  if (!wrap) return;
+  const rows = hof.entries ?? [];
+  wrap.innerHTML = rows.length
+    ? rows.map((e, i) => {
+        const when = new Date(e.at || 0);
+        const date = e.at ? `${when.getDate()}/${when.getMonth() + 1}` : "";
+        return `<div class="hrow${i === 0 ? " first" : ""}">
+          <span class="pos">${String(i + 1).padStart(2, "0")}</span>
+          <span class="ini">${e.initials}</span>
+          <span class="sc">${e.score.toLocaleString()}</span>
+          <span class="fl">floor ${e.floor}${e.extracted ? " ✓" : ""}</span>
+          <span class="kd">${e.kills} kills</span>
+          <span class="dt">${date}</span>
+        </div>`;
+      }).join("")
+    : '<div class="hrow"><span class="ini">—</span><span class="sc">no runs recorded yet</span></div>';
+  const line = $("#bestLine");
+  if (line) line.textContent = `BEST — ${topLine(hof)}`;
 }
 
 function toast(text, warn = false, ms = 1400) {
@@ -210,6 +203,7 @@ function beginRun(seed, cursesEnabled) {
   G.hp = G.run.maxHp; G.shield = 0;
   G.runStartedAt = performance.now();
   tStartRun(G.seedText, { curses: !!G.run.cursesEnabled });
+  achState = newAchievementState();      // this run earns its own
   frameErrors = 0;
   G.runDamageTaken = 0; G.runHeadshots = 0;
   SFX.startAmbient();
@@ -413,7 +407,7 @@ function onRoomCleared() {
   // Rate the room and let the director push harder or ease off next time.
   const st = G.roomStats ?? {};
   G.skill = updateSkill(G.skill, { clearedSecs: st.secs ?? 0, damageTaken: st.damageTaken ?? 0, accuracy: st.shotsFired ? st.shotsHit / st.shotsFired : 0.5 });
-  localStorage.setItem("hs_skill", String(G.skill));
+  // deliberately not persisted: the next run is a different person
   tlog("room_clear", {
     floor: G.run.floor, room: G.run.roomIndex + 1,
     secs: Math.round((G.roomStats?.secs ?? 0) * 10) / 10,
@@ -735,6 +729,37 @@ function endRun(kind) {
   $("#repStats").innerHTML = `<span>floor reached</span><b>${r.depthReached}</b><span>kills</span><b>${r.kills}</b><span>rooms</span><b>${r.roomsCleared}</b><span>items</span><b>${r.held.length}</b><span>depth mult</span><b>×${br.depthMult}</b><span>best</span><b>${G.best.toLocaleString()}</b>`;
   $("#repBonus").textContent = br.bonuses.length ? "STYLE: " + br.bonuses.map(b => `${b.name} +${b.points}`).join(" · ") : "";
   $("#repSeed").textContent = `SEED ${G.seedText}`;
+
+  const secs = Math.round((performance.now() - (G.runStartedAt ?? performance.now())) / 1000);
+
+  // Achievements are earned WITHIN this run and travel with the score onto the
+  // board. Nothing carries to the next player, because the next player is a
+  // stranger. Computed before the ranking, which displays them.
+  const ach = checkAchievements(achState, {
+    floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
+    bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted", score: sc,
+    itemsHeld: r.held, secs, damageTaken: Math.round(G.runDamageTaken ?? 0),
+    headshots: G.runHeadshots ?? 0,
+    curses: r.held.filter((id) => ITEM_BY_ID[id]?.rarity === "cursed").length,
+    synergies: (G.synergies ?? []).length,
+  });
+  achState = ach.state;
+  const earned = achState.earned ?? [];
+  $("#repAch").innerHTML = earned.map((id) => `<span class="ach">${ACHIEVEMENTS[id]?.name ?? id}</span>`).join("");
+
+  // Made the board? Take three letters, arcade style.
+  G.pendingEntry = qualifies(hof, sc)
+    ? { score: sc, floor: r.depthReached, kills: r.kills, secs,
+        extracted: kind === "extracted", achievements: earned }
+    : null;
+  const place = G.pendingEntry ? rank(hof, sc) : null;
+  $("#repRank").textContent = place ? `RANK ${place} OF ${MAX_ENTRIES} — ENTER YOUR INITIALS` : "";
+  $("#initialsRow").classList.toggle("hidden", !G.pendingEntry);
+  if (G.pendingEntry) {
+    const box = $("#initials");
+    box.value = "";
+    setTimeout(() => box.focus(), 120);
+  }
   show("#report");
   if (kind === "dead") SFX.death();
   tlog("run_end", {
@@ -744,32 +769,6 @@ function endRun(kind) {
     lastDamage: G.lastDamageWhy ?? null,
   });
   tFlush();
-  // Meta-progression: totals and unlocks survive the run. itemsHeld is the
-  // ARRAY, not its length — meta.js counts it itself.
-  // Achievements read the same summary the profile does.
-  const achSummary = {
-    floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
-    bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted", score: sc,
-    itemsHeld: r.held, secs: Math.round((performance.now() - (G.runStartedAt ?? performance.now())) / 1000),
-    damageTaken: Math.round(G.runDamageTaken ?? 0), headshots: G.runHeadshots ?? 0,
-    curses: r.held.filter((id) => ITEM_BY_ID[id]?.rarity === "cursed").length,
-    synergies: (G.synergies ?? []).length,
-  };
-  const ach = checkAchievements(achState, achSummary);
-  achState = ach.state;
-  localStorage.setItem("hs_achievements", JSON.stringify(achState));
-  if (ach.newly.length) {
-    const names = ach.newly.map((id) => ACHIEVEMENTS[id]?.name ?? id).join(" · ");
-    setTimeout(() => toast(`ACHIEVEMENT — ${names}`, false, 4000), 900);
-  }
-  const meta = applyRun(profile, {
-    floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
-    bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted",
-    score: sc, itemsHeld: r.held, secs: Math.round((performance.now() - (G.runStartedAt ?? performance.now())) / 1000),
-  });
-  profile = meta.profile;
-  localStorage.setItem("hs_profile", serializeProfile(profile));
-  if (meta.newlyUnlocked.length) toast("UNLOCKED — " + meta.newlyUnlocked.map((id) => UNLOCKS[id].name).join(" · "), false, 3600);
 }
 
 function renderSynergyLine() {
@@ -1178,8 +1177,7 @@ function frame(now) {
 // -------------------------------------------------------------- menu wiring --
 function menu() {
   input.releaseLock();
-  $("#bestLine").textContent = (G.best ? `BEST ${G.best.toLocaleString()} · ` : "") + profileSummary(profile).text
-    + " · " + achievementProgress(achState).text;
+  renderHof();
   $("#menuHint").textContent = input.isTouch ? "left thumb: move · right thumb: look · buttons: fire / dash / jump / reload" : "WASD · mouse · shift dash · space jump · R reload · click to lock";
   show("#menu");
 }
@@ -1188,8 +1186,11 @@ $("#btnRun").addEventListener("click", () => {
   const seed = txt ? (parseSeed(txt) ?? (Math.random() * 2 ** 32) >>> 0) : (Math.random() * 2 ** 32) >>> 0;
   beginRun(seed, $("#chkCurses").checked);
 });
-$("#btnProgress").addEventListener("click", () => { renderProgress(); show("#progress"); });
-$("#btnProgClose").addEventListener("click", () => menu());
+$("#btnProgress").addEventListener("click", () => { renderHof(); show("#hof"); });
+$("#btnHofClose").addEventListener("click", () => menu());
+$("#btnEnter").addEventListener("click", commitEntry);
+$("#initials").addEventListener("keydown", (e) => { if (e.key === "Enter") commitEntry(); });
+$("#initials").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3); });
 $("#btnShopLeave").addEventListener("click", leaveShop);
 $("#btnShopReroll").addEventListener("click", () => {
   const res = rerollStock(makeRng(G.run.seed).fork(`shopre${G.run.gold}`),

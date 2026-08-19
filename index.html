@@ -146,6 +146,18 @@
     .prow.have b{color:#e8eef6}
     .prow.locked{opacity:.45}
     .prow.gold.have{border-left-color:var(--gold)}
+    #hofRows{max-height:60vh;overflow-y:auto;min-width:min(560px,92vw);font-size:12px}
+    .hrow{display:grid;grid-template-columns:32px 44px 1fr 84px 72px 44px;gap:10px;padding:5px 8px;align-items:center;border-bottom:1px solid rgba(255,255,255,.05)}
+    .hrow .pos{color:var(--dim)} .hrow .ini{letter-spacing:.18em;color:#e8eef6}
+    .hrow .sc{color:var(--gold);text-align:right} .hrow .fl,.hrow .kd,.hrow .dt{color:var(--dim);font-size:11px}
+    .hrow.first .ini,.hrow.first .sc{color:var(--accent);text-shadow:0 0 10px rgba(255,92,58,.4)}
+    #repAch{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+    #repAch .ach{font-size:10px;letter-spacing:.1em;padding:3px 8px;border:1px solid var(--gold);color:var(--gold);border-radius:3px}
+    #repRank{color:var(--accent);letter-spacing:.12em;font-size:12px;margin-top:6px}
+    #initialsRow{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:10px}
+    #initialsRow.hidden{display:none}
+    #initials{width:120px;font-family:inherit;font-size:26px;letter-spacing:.3em;text-align:center;text-transform:uppercase;
+      background:#0c0f14;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:6px 4px}
     .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
     .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
     #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
@@ -214,7 +226,7 @@
     <p>You are a salvage drone dropped into a derelict station whose rooms rearrange between visits. Fight through it with a gun that changes every time you find something. Extract, or go deeper.</p>
     <div class="row">
       <button class="big" id="btnRun">New Run</button>
-      <button class="big ghost" id="btnDaily">Daily Seed</button><button class="big ghost" id="btnProgress">Progress</button>
+      <button class="big ghost" id="btnDaily">Daily Seed</button><button class="big ghost" id="btnProgress">Hall of Fame</button>
     </div>
     <div class="row">
       <input class="seed" id="seedInput" placeholder="SEED (optional)" maxlength="10" />
@@ -238,16 +250,11 @@
     <div class="row"><button class="big" id="btnSwap">Take It</button><button class="big ghost" id="btnKeep">Keep Mine</button></div>
   </div>
 
-  <!-- progress -->
-  <div id="progress" class="layer screen hidden">
-    <div class="sub">salvage record</div>
-    <div id="progHead"></div>
-    <div id="progTotals"></div>
-    <div id="progCols">
-      <div><h4>UNLOCKS</h4><div id="progUnlocks"></div></div>
-      <div><h4>ACHIEVEMENTS</h4><div id="progAch"></div></div>
-    </div>
-    <div class="row"><button class="big" id="btnProgClose">Back</button></div>
+  <!-- hall of fame -->
+  <div id="hof" class="layer screen hidden">
+    <div class="sub">hall of fame · this machine</div>
+    <div id="hofRows"></div>
+    <div class="row"><button class="big" id="btnHofClose">Back</button></div>
   </div>
 
   <!-- room event -->
@@ -300,6 +307,12 @@
     <div class="bonus" id="repBonus"></div>
     <div class="row"><button class="big" id="btnAgain">Run Again</button><button class="big ghost" id="btnMenu">Menu</button></div>
     <div class="sub" id="repSeed"></div>
+    <div id="repAch"></div>
+    <div id="repRank"></div>
+    <div id="initialsRow" class="hidden">
+      <input id="initials" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA" aria-label="your initials">
+      <button class="big" id="btnEnter">Enter</button>
+    </div>
   </div>
 
   <script type="module" src="/src/game/main.js"></script>
