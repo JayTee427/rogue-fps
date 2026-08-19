@@ -24,7 +24,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (...p) => readFileSync(join(here, "..", "..", ...p), "utf-8");
 
 const RENDERER = read("src", "game", "renderer.js");
-const MAIN = read("src", "game", "main.js");
+// The run flow (biomeFog, the buildArena call) lives in flow.js since the
+// main.js split; main.js is a 22-line entry point now.
+const MAIN = read("src", "game", "flow.js");
 
 /** Every `pal.<key>` buildArena dereferences. */
 function keysBuildArenaReads() {
@@ -50,7 +52,7 @@ describe("arena palettes are complete for their consumer", () => {
     expect(gaps).toEqual([]);
   });
 
-  it("main.js forwards the whole palette rather than cherry-picking keys", () => {
+  it("flow.js forwards the whole palette rather than cherry-picking keys", () => {
     // The original bug in one line. Listing keys at the call site means the list
     // has to be updated whenever buildArena reads a new one, and nothing says so.
     const call = MAIN.match(/palette:\s*([^\n]*)/);

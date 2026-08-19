@@ -5,7 +5,6 @@
 
 import * as THREE from "three";
 import { spawnHazards, stepHazards } from "core/hazards.js";
-import { COLORS } from "./renderer.js";
 import { SFX } from "./audio.js";
 
 export class HazardView {

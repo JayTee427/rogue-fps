@@ -2,7 +2,6 @@
 // Firing logic reads the resolved weapon stats; hits go through core/combat.
 
 import * as THREE from "three";
-import { ARCHETYPES } from "core/weapons.js";
 import { COLORS } from "./renderer.js";
 import { SFX } from "./audio.js";
 
