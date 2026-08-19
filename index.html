@@ -163,6 +163,13 @@
     #signinRow.hidden{display:none}
     #pilotInitials{width:96px;font-family:inherit;font-size:20px;letter-spacing:.28em;text-align:center;text-transform:uppercase;
       background:#0c0f14;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:5px 4px}
+    #pinEntry{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin:6px 0}
+    #pinEntry.hidden{display:none}
+    #pinMsg{width:100%;text-align:center;font-size:11px;color:var(--accent);letter-spacing:.06em}
+    #pinInput,#setPin{width:110px;font-family:inherit;font-size:16px;letter-spacing:.24em;text-align:center;
+      background:#0c0f14;color:var(--gold);border:1px solid #2a3140;border-radius:4px;padding:5px 4px}
+    #pinHint{font-size:10px;color:var(--dim);opacity:.7;text-align:center;margin-top:6px;letter-spacing:.04em}
+    #dailyNote{font-size:11px;color:var(--dim);opacity:.75;letter-spacing:.06em;margin:2px 0 6px}
     .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
     .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
     #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
@@ -238,10 +245,16 @@
       <label class="chk"><input type="checkbox" id="chkCurses" /> allow cursed items</label>
     </div>
     <div class="sub" id="menuHint">WASD · mouse · shift dash · space jump · R reload · click to lock</div>
+    <div id="dailyNote"></div>
     <div id="signinRow" class="hidden">
       <input id="pilotInitials" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA" aria-label="pilot initials">
       <button class="big" id="btnSignIn">Sign In</button>
       <button class="big ghost" id="btnSignOut">Anonymous</button>
+    </div>
+    <div id="pinEntry" class="hidden">
+      <div id="pinMsg"></div>
+      <input id="pinInput" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="PIN" aria-label="pilot PIN">
+      <button class="big" id="btnPinOk">Unlock</button>
     </div>
     <div id="pilotLine"></div>
     <div class="sub" id="bestLine"></div>
@@ -322,8 +335,10 @@
     <div id="repRank"></div>
     <div id="initialsRow" class="hidden">
       <input id="initials" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA" aria-label="your initials">
+      <input id="setPin" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="PIN (optional)" aria-label="optional PIN">
       <button class="big" id="btnEnter">Enter</button>
     </div>
+    <div id="pinHint">a PIN keeps others on THIS device from playing as you · it is not security</div>
   </div>
 
   <script type="module" src="/src/game/main.js"></script>

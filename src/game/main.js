@@ -77,21 +77,59 @@ let profile = newProfile();
 
 const profileKey = (initials) => `hs_pilot_${sanitizeInitials(initials)}`;
 
-function signIn(initials) {
-  pilot = sanitizeInitials(initials);
-  profile = deserializeProfile(localStorage.getItem(profileKey(pilot)));
+/** Only ever compared against itself, never sent anywhere. Stored scrambled so a
+ *  casual glance at localStorage does not reveal it - NOT a security measure, and
+ *  the UI does not claim otherwise. */
+function scramblePin(pin, initials) {
+  const s = `${initials}:${String(pin)}`;
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+function pilotHasPin(initials) {
+  const raw = localStorage.getItem(profileKey(initials));
+  try { return !!JSON.parse(raw ?? "null")?.pin; } catch { return false; }
+}
+
+function pinMatches(initials, pin) {
+  const raw = localStorage.getItem(profileKey(initials));
+  try {
+    const stored = JSON.parse(raw ?? "null")?.pin;
+    return !stored || stored === scramblePin(pin, sanitizeInitials(initials));
+  } catch { return true; }
+}
+
+function signIn(initials, { trusted = false } = {}) {
+  const who = sanitizeInitials(initials);
+  const stored = localStorage.getItem(profileKey(who));
+  // A PIN is only asked for when this browser does not already know you. The
+  // device that has been playing all along is not interrogated every session.
+  if (!trusted && stored && pilotHasPin(who)) return { needsPin: true, who };
+  pilot = who;
+  profile = deserializeProfile(stored);
+  // deserializeProfile drops fields it does not know about, so carry the pin over
+  try { const raw = JSON.parse(stored ?? "null"); if (raw?.pin) profile.pin = raw.pin; } catch {}
+  localStorage.setItem("hs_last_pilot", pilot);
   saveProfile();
   updatePilotLine();
+  return { ok: true, who };
 }
 
 function signOut() {
   pilot = null;
   profile = newProfile();
+  localStorage.removeItem("hs_last_pilot");
   updatePilotLine();
 }
 
 function saveProfile() {
-  if (pilot) localStorage.setItem(profileKey(pilot), serializeProfile(profile));
+  if (!pilot) return;
+  // serializeProfile only knows the fields core/meta.js defines, so the pin is
+  // merged back in rather than being silently dropped on every save.
+  const body = JSON.parse(serializeProfile(profile));
+  if (profile.pin) body.pin = profile.pin;
+  localStorage.setItem(profileKey(pilot), JSON.stringify(body));
 }
 
 function updatePilotLine() {
@@ -199,6 +237,18 @@ function commitEntry() {
   const initials = sanitizeInitials($("#initials")?.value);
   hof = addEntry(hof, { ...G.pendingEntry, initials, at: Date.now() });
   localStorage.setItem("hs_hof", serializeTable(hof));
+  // Claim these initials as a pilot, and optionally lock them to a PIN. Signing
+  // in here means the next run carries whatever this run earned.
+  const wantPin = ($("#setPin")?.value ?? "").trim();
+  const alreadyKnown = !!localStorage.getItem(profileKey(initials));
+  if (!alreadyKnown || pilot === initials) {
+    signIn(initials, { trusted: true });
+    if (wantPin.length >= 3) {
+      profile.pin = scramblePin(wantPin, initials);
+      saveProfile();
+      toast(`${initials} locked with a PIN on this device`, false, 3000);
+    }
+  }
   G.pendingEntry = null;
   $("#initialsRow").classList.add("hidden");
   $("#repRank").textContent = `${initials} RECORDED`;
@@ -1259,7 +1309,29 @@ $("#btnContinue").addEventListener("click", () => { $("#signinRow").classList.to
 $("#btnSignIn").addEventListener("click", () => {
   const v = $("#pilotInitials")?.value;
   if (!v || !v.trim()) return;
-  signIn(v);
+  const pinBox = $("#pinEntry");
+  const res = signIn(v, { trusted: false });
+  if (res.needsPin) {
+    // Ask once, here, rather than pretending the name alone was enough.
+    pinBox.classList.remove("hidden");
+    $("#pinMsg").textContent = `${res.who} is locked on this device — enter their PIN`;
+    setTimeout(() => $("#pinInput").focus(), 60);
+    return;
+  }
+  pinBox.classList.add("hidden");
+  $("#signinRow").classList.add("hidden");
+  SFX.ui();
+});
+
+$("#btnPinOk").addEventListener("click", () => {
+  const who = $("#pilotInitials")?.value, pin = $("#pinInput")?.value;
+  if (!pinMatches(who, pin)) {
+    $("#pinMsg").textContent = "that PIN does not match — try again, or start a new run";
+    SFX.empty();
+    return;
+  }
+  signIn(who, { trusted: true });
+  $("#pinEntry").classList.add("hidden");
   $("#signinRow").classList.add("hidden");
   SFX.ui();
 });
@@ -1281,6 +1353,11 @@ $("#btnPactRefuse").addEventListener("click", () => resolvePact(false));
 $("#btnSwap").addEventListener("click", () => resolveWeapon(true));
 $("#btnKeep").addEventListener("click", () => resolveWeapon(false));
 $("#btnDaily").addEventListener("click", () => beginRun(dailySeed(), $("#chkCurses").checked));
+// Say what the daily actually is: the same station for everyone, today only.
+{
+  const d = $("#dailyNote");
+  if (d) d.textContent = `today's station is the same for everyone · seed ${formatSeed(dailySeed())}`;
+}
 $("#btnDeeper").addEventListener("click", () => { SFX.ui(); enterFloor(); });
 $("#btnExtract").addEventListener("click", () => { G.run = extract(G.run); SFX.extract(); endRun("extracted"); });
 $("#btnAgain").addEventListener("click", () => beginRun((Math.random() * 2 ** 32) >>> 0, G.run.cursesEnabled));
@@ -1308,6 +1385,11 @@ if (new URLSearchParams(location.search).has("dev")) {
     god() { G.invuln = 1e9; },
   };
 }
+
+// Sign the last pilot back in automatically. Retyping initials every session is
+// friction for nothing, and this browser has already proved it is theirs.
+const remembered = localStorage.getItem("hs_last_pilot");
+if (remembered) signIn(remembered, { trusted: true });
 
 // go
 $("#boot").classList.add("hidden");
