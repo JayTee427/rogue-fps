@@ -58,7 +58,13 @@ export function spawnHazards(rng, tag, arena, floor) {
     } else if (tag === "collapsing") {
       h = { id, kind: tag, x, z, radius: 1.8, state: "solid", timer: 1.2, dps: 20 };
     }
-    hazards.push(h);
+    // Hazards were placed without regard for cover, so a mine could sit inside a
+    // block: invisible until you walked round the corner onto it. Skip any that
+    // land in one rather than teaching the player that corners are lethal.
+    const buried = (arena.blocks ?? []).some(
+      (b) => Math.abs(x - b.x) < b.w / 2 + 0.6 && Math.abs(z - b.z) < b.d / 2 + 0.6
+    );
+    if (!buried) hazards.push(h);
   }
   return hazards;
 }

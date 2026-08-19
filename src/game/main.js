@@ -284,7 +284,12 @@ function enterRoom() {
   roomChallengeStart(seedRng.fork("challenge"), r.floor);
   hazards.spawn(seedRng.fork("hazards"), room.hazardTag, G.arena, r.floor);
   G.dressing?.removeFromParent();
-  G.dressing = buildDressing(scene, layoutDressing(seedRng.fork("dressing"), G.arena, r.floor), PROP_KINDS);
+  // Only wall and ceiling dressing. The floor props were visual noise, and worse,
+  // they competed with hazards and affix rings for the player's reading of what
+  // on the ground matters.
+  const props = layoutDressing(seedRng.fork("dressing"), G.arena, r.floor)
+    .filter((p) => PROP_KINDS[p.kind]?.mount !== "floor");
+  G.dressing = buildDressing(scene, props, PROP_KINDS);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
   // A short grace on arrival. Being shot before you have looked around is not
   // difficulty, it is a bad first impression.

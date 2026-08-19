@@ -75,6 +75,13 @@ export class EnemyManager {
     const base = rollRoster(rng, floor, roomIndex, mods);
     const pool = foeRoster(rng, floor, roomIndex).filter((id) => EXTRA_FOES[id]);
     let roster = base.map((id) => (pool.length && rng.chance(0.3) ? rng.pick(pool) : id));
+    // rollRoster sizes every room the same regardless of position, so the first
+    // room of the game arrived with eight enemies. Ramp the early rooms instead:
+    // the opener is a handful, and by room 5 you get the full roster.
+    const ramp = floor === 1
+      ? [3, 4, 5, 6, 7][Math.min(4, roomIndex)]
+      : [5, 6, 7, 8, 9][Math.min(4, roomIndex)] + Math.floor((floor - 2) * 0.8);
+    if (roster.length > ramp) roster = roster.slice(0, ramp);
     // The very first room is a first impression. A Popper rushes you and
     // detonates, which is a fine lesson on floor 2 and a bad one before the
     // player has learned to move. Swap them out of the opening room only.

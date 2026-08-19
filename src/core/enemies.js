@@ -1,5 +1,5 @@
 export const ENEMY_ARCHETYPES = {
-  skitter: { name: "Skitter", hp: 30, speed: 9, damage: 8, role: "melee", tell: "darts quickly" },
+  skitter: { name: "Skitter", hp: 30, speed: 6.6, damage: 5, role: "melee", tell: "darts quickly" },
   sentinel: { name: "Sentinel", hp: 60, speed: 4, damage: 12, role: "ranged", tell: "holds position" },
   brute: { name: "Brute", hp: 220, speed: 3, damage: 35, role: "melee", tell: "heavy stomps" },
   popper: { name: "Popper", hp: 25, speed: 8, damage: 40, role: "suicide", tell: "explodes on sight" },

@@ -5,8 +5,8 @@ const EXTRA_FOES = {
     id: "lurker",
     name: "Lurker",
     hp: 50,
-    damage: 10,
-    speed: 6,
+    damage: 7,
+    speed: 5.4,
     minFloor: 1,
     role: "melee",
     tell: "emerges from shadow"
