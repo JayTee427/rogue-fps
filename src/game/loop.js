@@ -56,6 +56,7 @@ function applyQuality(tier) {
 // ------------------------------------------------------------------ loop --
 function frameBody(now) {
   let dt = Math.min(0.05, (now - G.lastFrame) / 1000); G.lastFrame = now;
+  G.lastDt = dt;                     // the probe reports it; nothing was writing it
   if (G.hitstop > 0) { G.hitstop -= dt; dt *= 0.15; }
   if (G.btT > 0) { G.btT -= dt; if (G.btT <= 0) G.timeScale = 1; }
   G.btCd = Math.max(0, (G.btCd ?? 0) - dt);
