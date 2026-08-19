@@ -86,7 +86,12 @@ export function createRenderer(container, tierName) {
   // as light rather than as bright paint. It is the single biggest lever for a
   // stylised look, and it is cheap enough for medium tier; low tier skips it.
   let composer = null, bloom = null, grade = null;
-  if (tier.bloom !== false && tierName !== "low") {
+  // ?nofx skips the whole post chain and renders straight to the canvas. The
+  // unwritten region is a fixed number of pixels that does not follow the
+  // buffer, which points at something in this chain being sized once; this
+  // makes that a ten-second test instead of another round of guessing.
+  const noFx = typeof location !== "undefined" && new URLSearchParams(location.search).has("nofx");
+  if (tier.bloom !== false && tierName !== "low" && !noFx) {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.78, 0.7, 0.55);

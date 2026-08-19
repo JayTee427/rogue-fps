@@ -1297,20 +1297,27 @@ function frameBody(now) {
     G.scanT = 0;
     try {
       const gl = renderer.getContext();
+      // Measure the middle scanline of whatever is currently in the buffer.
+      const scan = () => {
+        const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+        const row = new Uint8Array(w * 4);
+        gl.readPixels(0, Math.floor(h / 2), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
+        const bands = 16, out = [];
+        for (let b = 0; b < bands; b++) {
+          const x0 = Math.floor(b * w / bands), x1 = Math.floor((b + 1) * w / bands);
+          let s = 0, n = 0;
+          for (let x = x0; x < x1; x++) { const i = x * 4; s += 0.2126 * row[i] + 0.7152 * row[i + 1] + 0.0722 * row[i + 2]; n++; }
+          out.push(Math.round(s / Math.max(1, n)));
+        }
+        return out;
+      };
       const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
-      const row = new Uint8Array(w * 4);
-      gl.readPixels(0, Math.floor(h / 2), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
-      const bands = 16, prof = [];
-      for (let b = 0; b < bands; b++) {
-        const x0 = Math.floor(b * w / bands), x1 = Math.floor((b + 1) * w / bands);
-        let s = 0, n = 0;
-        for (let x = x0; x < x1; x++) { const i = x * 4; s += 0.2126 * row[i] + 0.7152 * row[i + 1] + 0.0722 * row[i + 2]; n++; }
-        prof.push(Math.round(s / Math.max(1, n)));
-      }
+      const prof = scan();
       // A band under 4/255 is not a dark room, it is nothing being drawn there.
       // Report a few times and then stop: enough to see whether it moves with
       // the view, never enough to become noise.
-      if (Math.min(...prof) < 4 && (G.bandN = (G.bandN ?? 0) + 1) <= 6) {
+      // Strictly zero: the grade pass never leaves a drawn pixel this dark.
+      if (Math.min(...prof) < 2 && (G.bandN = (G.bandN ?? 0) + 1) <= 8) {
         // The question this exists to settle: is the black inside the WebGL
         // buffer, or is it something in the DOM sitting on top of the canvas?
         // The scanline answers the first, elementFromPoint answers the second.
@@ -1320,12 +1327,50 @@ function frameBody(now) {
           .slice(0, 3)
           .map((e) => `${e.tagName}#${e.id || "-"}.${(e.className || "").toString().trim().split(/\s+/)[0] || "-"}`)
           .join(" > ");
+        // Exact bounds of the unwritten run, in buffer pixels. Anything the
+        // grade pass touched reads 4 or more, so a true zero means nothing was
+        // drawn there at all.
+        const mid = new Uint8Array(w * 4);
+        gl.readPixels(0, Math.floor(h / 2), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, mid);
+        const zero = (x) => mid[x * 4] === 0 && mid[x * 4 + 1] === 0 && mid[x * 4 + 2] === 0;
+        let x0 = -1, x1 = -1;
+        for (let x = 0; x < w; x++) if (zero(x)) { if (x0 < 0) x0 = x; x1 = x; }
+        // Same for a column, so the rectangle is known in both axes.
+        const col = new Uint8Array(h * 4);
+        const probeCol = x0 >= 0 ? Math.floor((x0 + x1) / 2) : Math.floor(w / 2);
+        gl.readPixels(probeCol, 0, 1, h, gl.RGBA, gl.UNSIGNED_BYTE, col);
+        let y0 = -1, y1 = -1;
+        for (let y = 0; y < h; y++) {
+          if (col[y * 4] === 0 && col[y * 4 + 1] === 0 && col[y * 4 + 2] === 0) { if (y0 < 0) y0 = y; y1 = y; }
+        }
+        // Everything that decides where drawing lands.
+        const vp = renderer.getViewport(new THREE.Vector4());
+        const sc = renderer.getScissor(new THREE.Vector4());
+        const rt1 = R.composer?.renderTarget1, rt2 = R.composer?.renderTarget2;
+        const state = {
+          viewport: `${Math.round(vp.x)},${Math.round(vp.y)},${Math.round(vp.z)},${Math.round(vp.w)}`,
+          scissor: `${Math.round(sc.x)},${Math.round(sc.y)},${Math.round(sc.z)},${Math.round(sc.w)}`,
+          scissorTest: renderer.getScissorTest(),
+          rt1: rt1 ? `${rt1.width}x${rt1.height}` : null,
+          rt2: rt2 ? `${rt2.width}x${rt2.height}` : null,
+          bloomRes: R.bloom?.resolution ? `${Math.round(R.bloom.resolution.x)}x${Math.round(R.bloom.resolution.y)}` : null,
+          pr: renderer.getPixelRatio(),
+        };
+
         tlog("black_band", {
           buf: `${w}x${h}`, css: `${renderer.domElement.clientWidth}x${renderer.domElement.clientHeight}`,
           view: `${window.innerWidth}x${window.innerHeight}`, dpr: window.devicePixelRatio,
           tier: G.qTier, yaw: Math.round((player.yaw ?? 0) * 57.3),
           pitch: Math.round((player.pitch ?? 0) * 57.3),
           prof: prof.join(","), overCentre: over || "(nothing over the canvas)",
+          // The unwritten rectangle itself, in buffer pixels.
+          zeroRect: x0 < 0 ? null : `x ${x0}..${x1} (${x1 - x0 + 1}px) y ${y0}..${y1} (${y1 - y0 + 1}px)`,
+          ...state,
+          // "attacked constantly but took no damage" says the frame was only
+          // partly executing. Record enough to tell a stalled loop from a
+          // drawing fault.
+          hp: Math.round(G.hp), alive: enemies.list.filter((e) => e.alive).length,
+          roomActive: !!G.roomActive, errs: frameErrors, dt: Math.round((G.lastDt ?? 0) * 1000),
         });
         tFlush();
       }
