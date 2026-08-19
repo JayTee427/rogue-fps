@@ -190,9 +190,14 @@ function governQuality(dt) {
 function applyQuality(tier) {
   const t = TIERS[tier];
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * t.resScale);
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  // Not renderer.setSize on its own: the composer and the camera have to move
+  // with it, and onResize is the one place that knows all three.
+  R.resize();
   if (R.bloom) R.bloom.enabled = tier !== "low";
+  // Both halves together: the renderer flag alone left the light still
+  // flagged from whatever tier the game started at.
   renderer.shadowMap.enabled = !!t.shadows;
+  if (R.sun) R.sun.castShadow = !!t.shadows;
   $("#perf").dataset.tier = tier;
 }
 
@@ -1268,14 +1273,53 @@ function frameBody(now) {
       if (G.stepPhase >= 1) { G.stepPhase = 0; footstep(gsp / 7); }
     }
     governQuality(dt || 0.016);
+  // Costs two integer comparisons a second and turns a black half-screen
+  // into a hiccup that reports itself.
+  G.sizeT = (G.sizeT ?? 0) + (dt || 0.016);
+  if (G.sizeT > 1) {
+    G.sizeT = 0;
+    const drift = R.ensureSize();
+    if (drift) tlog("viewport_fix", drift);
+  }
     G.fpsAcc += dt || 0.016; G.fpsN++; if (G.fpsAcc > 0.5) { $("#perf").textContent = `${G.qTier.toUpperCase()} · ${Math.round(G.fpsN / G.fpsAcc)} FPS`; G.fpsAcc = 0; G.fpsN = 0; }
   }
   render();
+
+  // The reported black band has outlived six explanations, none of which
+  // reproduce here. So measure it where it happens: one scanline out of the
+  // finished frame, and only complain when part of it really is black. Dev
+  // builds only - it costs a readPixels of a single row.
+  if (DEV_PROBE && (G.scanT = (G.scanT ?? 0) + 0.016) > 2) {
+    G.scanT = 0;
+    try {
+      const gl = renderer.getContext();
+      const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+      const row = new Uint8Array(w * 4);
+      gl.readPixels(0, Math.floor(h / 2), w, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
+      const bands = 16, prof = [];
+      for (let b = 0; b < bands; b++) {
+        const x0 = Math.floor(b * w / bands), x1 = Math.floor((b + 1) * w / bands);
+        let s = 0, n = 0;
+        for (let x = x0; x < x1; x++) { const i = x * 4; s += 0.2126 * row[i] + 0.7152 * row[i + 1] + 0.0722 * row[i + 2]; n++; }
+        prof.push(Math.round(s / Math.max(1, n)));
+      }
+      // A band under 4/255 is not a dark room, it is nothing being drawn there.
+      if (Math.min(...prof) < 4) {
+        tlog("black_band", {
+          buf: `${w}x${h}`, css: `${renderer.domElement.clientWidth}x${renderer.domElement.clientHeight}`,
+          view: `${window.innerWidth}x${window.innerHeight}`, dpr: window.devicePixelRatio,
+          tier: G.qTier, yaw: Math.round((player.yaw ?? 0) * 57.3), prof: prof.join(","),
+        });
+      }
+    } catch { /* readPixels can fail on a lost context; never break the frame for a probe */ }
+  }
 }
 
 // --- error boundary -------------------------------------------------------
 // Keep the loop alive through a throw, tell the player something went wrong
 // rather than freezing, and stop shouting after the first few.
+// Only under ?dev - the probe reads back a scanline and that is not free.
+const DEV_PROBE = new URLSearchParams(location.search).has("dev");
 let frameErrors = 0;
 function frame(now) {
   requestAnimationFrame(frame);

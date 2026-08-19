@@ -48,6 +48,18 @@ export function startRun(seed, meta = {}) {
     coarse: matchMedia("(pointer: coarse)").matches,
     anyFine: matchMedia("(any-pointer: fine)").matches,
     maxTouch: navigator.maxTouchPoints,
+    // Geometry, so a report of "half the screen is black" arrives with numbers.
+    ...(() => {
+      const c = document.querySelector("canvas");
+      if (!c) return { canvas: null };
+      const b = c.getBoundingClientRect();
+      return {
+        canvasBuf: `${c.width}x${c.height}`,
+        canvasCss: `${Math.round(b.width)}x${Math.round(b.height)}`,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        dpr: window.devicePixelRatio,
+      };
+    })(),
   });
 }
 

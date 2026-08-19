@@ -65,13 +65,18 @@ export function createRenderer(container, tierName) {
   scene.add(new THREE.AmbientLight(0x2a3a5a, 1.4));
   const sun = new THREE.DirectionalLight(0xfff0dd, 3.2);
   sun.position.set(12, 22, 8);
+  // Configured unconditionally. This used to sit inside `if (tier.shadows)`,
+  // which runs once at construction - so a machine that started at medium kept
+  // Three's default 5-metre shadow box, and if anything later switched shadows
+  // on, every surface beyond 5m sampled outside the shadow map.
   sun.castShadow = !!tier.shadows;
-  if (tier.shadows) {
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
-    sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
-    sun.shadow.camera.far = 80; sun.shadow.bias = -0.0015;
-  }
+  sun.shadow.mapSize.set(1024, 1024);
+  // biomeLayout caps halfW at 30, so the box has to cover a 60m room corner to
+  // corner or the far side falls outside the frustum.
+  sun.shadow.camera.left = -46; sun.shadow.camera.right = 46;
+  sun.shadow.camera.top = 46; sun.shadow.camera.bottom = -46;
+  sun.shadow.camera.far = 120; sun.shadow.bias = -0.0015;
+  sun.shadow.camera.updateProjectionMatrix();
   scene.add(sun);
   const rim = new THREE.PointLight(COLORS.accent2, 6, 40, 1.6);
   rim.position.set(0, 6, 0);
@@ -122,16 +127,46 @@ void main() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight, false);
+    // The composer keeps its OWN pixel ratio, captured when it was constructed.
+    // applyQuality changes the renderer ratio on every tier change, so without
+    // this the composer's targets stay sized for the old ratio and the frame is
+    // drawn into a sub-rectangle of the canvas - a correct picture in part of
+    // the screen and black everywhere else.
+    composer?.setPixelRatio(renderer.getPixelRatio());
     composer?.setSize(window.innerWidth, window.innerHeight);
   };
   window.addEventListener("resize", onResize);
+
+  /** The canvas, the camera and the composer must all agree with the window.
+   *  They can drift apart without anything throwing: a quality change that
+   *  resizes only the renderer, a resize event that never arrived, a zoom
+   *  change. The composer then blits a target that no longer matches the
+   *  canvas, which draws a correct picture into part of the screen and leaves
+   *  the rest black - a bug that looks like a rendering problem and is really a
+   *  bookkeeping one. Checking is two integer comparisons, so it is checked
+   *  rather than assumed. Returns what was wrong, or null if nothing was.  */
+  const ensureSize = () => {
+    const c = renderer.domElement, pr = renderer.getPixelRatio();
+    const wantW = Math.round(window.innerWidth * pr), wantH = Math.round(window.innerHeight * pr);
+    const rt = composer?.renderTarget1;
+    const stale = rt && (rt.width !== wantW || rt.height !== wantH);
+    if (c.width === wantW && c.height === wantH && !stale) return null;
+    const was = {
+      canvas: `${c.width}x${c.height}`,
+      target: rt ? `${rt.width}x${rt.height}` : null,
+      want: `${wantW}x${wantH}`,
+      css: `${c.clientWidth}x${c.clientHeight}`,
+    };
+    onResize();
+    return was;
+  };
 
   const render = () => {
     if (grade) grade.uniforms.uTime.value = performance.now() * 0.001;
     if (composer) composer.render(); else renderer.render(scene, camera);
   };
 
-  return { renderer, scene, camera, tier, composer, bloom, grade, render, dispose() { window.removeEventListener("resize", onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, tier, sun, composer, bloom, grade, render, resize: onResize, ensureSize, dispose() { window.removeEventListener("resize", onResize); renderer.dispose(); } };
 }
 
 const flat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
