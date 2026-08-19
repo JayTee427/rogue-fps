@@ -419,7 +419,7 @@ export class EnemyManager {
         if (e.atkCd <= 0) {
           e.atk = nextAttack(e.rng, e.bossId, e.hp / e.maxHp, e.atk?.shape ?? null);
           e.atkState = "windup"; e.atkT = 0; e._hitThis = false;
-          events.push({ type: "bossTelegraph", text: e.atk.telegraph, secs: e.atk.windup });
+          events.push({ type: "bossTelegraph", text: e.atk.telegraph, secs: e.atk.windup, shape: e.atk.shape, kind: e.atk.kind, pos: m.position.clone(), sweep: e.atk.sweep ?? null });
           playAt(m.position, () => SFX.sentinelCharge());
         }
         break;
@@ -435,7 +435,7 @@ export class EnemyManager {
         if (e.atkT >= e.atk.windup) {
           e.atkState = "active"; e.atkT = 0;
           this._restoreGlow(e); m.scale.setScalar(e.baseScale ?? 1);
-          events.push({ type: "bossAttack", shape: e.atk.shape, kind: e.atk.kind, pos: m.position.clone(), damage: e.damage });
+          events.push({ type: "bossAttack", shape: e.atk.shape, kind: e.atk.kind, pos: m.position.clone(), damage: e.damage, duration: e.atk.duration, sweep: e.atk.sweep ?? null });
         }
         break;
       case "active":
@@ -453,8 +453,11 @@ export class EnemyManager {
     }
 
     m.lookAt(pp.x, m.position.y, pp.z);
-    // It only closes ground while idle — committed attacks do not track you.
-    if (e.atkState === "idle" && dist > 5) this._move(e, nx * e.speed * 0.35, nz * e.speed * 0.35, dt, arena);
+    // It closes ground while idle and keeps drifting in through a wind-up —
+    // committed attacks still do not track you. A third of walk speed read
+    // as timid; half reads as something whose space you have to respect.
+    if (e.atkState === "idle" && dist > 5) this._move(e, nx * e.speed * 0.5, nz * e.speed * 0.5, dt, arena);
+    else if (e.atkState === "windup" && dist > 6) this._move(e, nx * e.speed * 0.25, nz * e.speed * 0.25, dt, arena);
     return events;
   }
 

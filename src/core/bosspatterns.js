@@ -3,9 +3,11 @@ export const ATTACK_SHAPES = {
   sweep_beam: {
     id: "sweep_beam",
     kind: "ranged",
-    telegraph: "Laser sweep charges left to right",
+    telegraph: "Laser sweep — cross behind it or jump it",
     windup: 1.2,
-    duration: 0.8
+    duration: 0.8,
+    // The sweep's whole geometry, so the shell only draws what this declares.
+    sweep: { arcDeg: 150, range: 22, height: 1.15 },
   },
   shockwave: {
     id: "shockwave",
@@ -105,4 +107,23 @@ export function telegraphFor(shapeId) {
     return shape.telegraph.slice(0, 40);
   }
   return "Something is about to happen";
+}
+/** Normalize an angle to (-PI, PI]. */
+export function normAngle(a) {
+  while (a <= -Math.PI) a += Math.PI * 2;
+  while (a > Math.PI) a -= Math.PI * 2;
+  return a;
+}
+
+/**
+ * Did a sweep moving from angle `prev` to angle `cur` pass over `target`?
+ * All angles absolute radians; handles wrap-around. The crossing moment is the
+ * only moment the beam can hit, which is what makes the sweep dodgeable: being
+ * somewhere the beam has already been is safe by construction.
+ */
+export function angleCrossed(prev, cur, target) {
+  const step = normAngle(cur - prev);
+  const toTarget = normAngle(target - prev);
+  if (step >= 0) return toTarget >= 0 && toTarget <= step;
+  return toTarget <= 0 && toTarget >= step;
 }

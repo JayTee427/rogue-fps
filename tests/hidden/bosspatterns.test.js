@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { rng } from "core/rng.js";
-import { BOSS_PATTERNS, ATTACK_SHAPES, bossPhase, nextAttack, telegraphFor } from "core/bosspatterns.js";
+import { BOSS_PATTERNS, ATTACK_SHAPES, bossPhase, nextAttack, telegraphFor, normAngle, angleCrossed } from "core/bosspatterns.js";
 
 const R = (s = 9) => rng(s);
 const BOSSES = ["custodian", "chorus", "landlord"];
@@ -142,5 +142,44 @@ describe("telegraphFor", () => {
 
   it("returns a string for an unknown shape rather than throwing", () => {
     expect(typeof telegraphFor("nope")).toBe("string");
+  });
+});
+
+describe("sweep beam geometry", () => {
+  it("declares the sweep so the shell draws data instead of inventing it", () => {
+    const sw = ATTACK_SHAPES.sweep_beam.sweep;
+    expect(sw.arcDeg).toBeGreaterThan(0);
+    expect(sw.range).toBeGreaterThan(0);
+    expect(sw.height).toBeGreaterThan(0);
+  });
+
+  it("normAngle wraps into (-PI, PI]", () => {
+    expect(normAngle(Math.PI * 3)).toBeCloseTo(Math.PI);
+    expect(normAngle(-Math.PI * 2.5)).toBeCloseTo(-Math.PI * 0.5);
+    expect(normAngle(0.3)).toBeCloseTo(0.3);
+  });
+
+  it("a sweep hits what it passes over and nothing else", () => {
+    // Sweeping 0 -> 0.5 rad crosses a target at 0.3, misses one at 0.7.
+    expect(angleCrossed(0, 0.5, 0.3)).toBe(true);
+    expect(angleCrossed(0, 0.5, 0.7)).toBe(false);
+    // Direction matters: the same arc travelled the other way.
+    expect(angleCrossed(0.5, 0, 0.3)).toBe(true);
+    expect(angleCrossed(0.5, 0, 0.7)).toBe(false);
+  });
+
+  it("handles the PI wrap without a blind spot", () => {
+    // Crossing the seam: from just under PI to just over (-PI side).
+    expect(angleCrossed(Math.PI - 0.1, -Math.PI + 0.1, Math.PI - 0.02)).toBe(true);
+    expect(angleCrossed(Math.PI - 0.1, -Math.PI + 0.1, 0)).toBe(false);
+  });
+
+  it("being where the beam has already been is safe by construction", () => {
+    // Successive frames of one sweep: a target crossed in frame one is not
+    // crossed again in frame two - one sweep, at most one hit.
+    const frames = [[0, 0.2], [0.2, 0.4], [0.4, 0.6]];
+    const target = 0.1;
+    const hits = frames.filter(([a, b]) => angleCrossed(a, b, target));
+    expect(hits.length).toBe(1);
   });
 });

@@ -22,6 +22,7 @@ import { BIOMES, pickBiome, biomePalette, biomeLayout } from "core/arenas.js";
 import { ROOM_EVENTS, rollEvent, resolveEvent } from "core/events.js";
 import { rollStock, buy, rerollStock, REROLL_COST } from "core/shop.js";
 import { BOONS, rollPact, acceptPact, refusePact } from "core/pact.js";
+import { angleCrossed } from "core/bosspatterns.js";
 import { activeSynergies, synergyEffects } from "core/synergy.js";
 import { passiveMods } from "core/effects.js";
 import { onShoot, onEnemyHit, onKill as killEffects, onHitTaken, onDeath } from "core/triggers.js";
@@ -359,6 +360,7 @@ function enterRoom() {
   G.roomRng = seedRng;
   G.mods = { swarm: room.modifier === "swarm", noDash: room.modifier === "no_dash", lowGravity: room.modifier === "low_gravity", darkness: room.modifier === "darkness", timePressure: room.modifier === "time_pressure" };
   G.arena?.dispose();
+  clearBossTell(); clearBeamSweep();
   // Each floor gets its own biome: its own palette, fog and room proportions.
   const biomeId = pickBiome(makeRng(r.seed).fork(`biome${r.floor}`), r.floor);
   const bp = biomePalette(biomeId);
@@ -448,6 +450,7 @@ function enterBoss() {
   const b = r.currentFloor.boss;
   const seedRng = makeRng(r.seed).fork(`boss${r.floor}`);
   G.arena?.dispose();
+  clearBossTell(); clearBeamSweep();
   G.arena = buildArena(scene, seedRng.fork("arena"), { blockCount: 4, halfW: 18, halfD: 18 });
   player.arena = G.arena; player.reset(0, 14); player.yaw = 0; player.pitch = 0;
   enemies.clear(); hazards.clear();
@@ -1133,6 +1136,29 @@ function onKill(e, res) {
   if (!G.bossMode && enemies.aliveCount === 0 && !wavesPending()) onRoomCleared();
 }
 
+/** A long thin glowing quad, origin at one end, pointing +Z; rotate to aim. */
+function makeBeamMesh(range, opacity) {
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, 0.18, range),
+    new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  m.geometry.translate(0, 0, range / 2);      // pivot at the boss, not the middle
+  scene.add(m);
+  return m;
+}
+
+function clearBossTell() {
+  if (!G.bossTell) return;
+  scene.remove(G.bossTell.mesh); G.bossTell.mesh.geometry.dispose(); G.bossTell.mesh.material.dispose();
+  G.bossTell = null;
+}
+
+function clearBeamSweep() {
+  if (!G.beamSweep) return;
+  scene.remove(G.beamSweep.mesh); G.beamSweep.mesh.geometry.dispose(); G.beamSweep.mesh.material.dispose();
+  G.beamSweep = null;
+}
+
 // Each attack shape resolves to something the player can see and react to. The
 // wind-up already happened — this is the moment it lands.
 function onBossAttack(ev) {
@@ -1156,9 +1182,23 @@ function onBossAttack(ev) {
       break;
     }
     case "sweep_beam": {
-      fx.trauma(0.3); SFX.sentinelCharge();
-      const d = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
-      if (d < 22) damagePlayer(ev.damage * 0.8, "beam");
+      // A beam that exists in space and time. It starts 75 degrees to one side
+      // of where you are standing and sweeps 150 degrees through you - so
+      // standing still is a guaranteed hit, crossing behind the sweep is a
+      // clean dodge, and jumping its crossing moment clears it entirely.
+      fx.trauma(0.2); SFX.sentinelCharge();
+      const sw = ev.sweep ?? { arcDeg: 150, range: 22, height: 1.15 };
+      const toPlayer = Math.atan2(player.pos.x - p.x, player.pos.z - p.z);
+      const arc = (sw.arcDeg * Math.PI) / 180;
+      const dir = G.roomRng.next() < 0.5 ? 1 : -1;
+      clearBeamSweep();
+      G.beamSweep = {
+        origin: p.clone(), a: toPlayer - (arc / 2) * dir, arc: arc * dir,
+        t: 0, dur: Math.max(0.2, ev.duration ?? 0.8),
+        dmg: ev.damage * 0.8, range: sw.range, height: sw.height, hit: false,
+        mesh: makeBeamMesh(sw.range, 1),
+      };
+      G.beamSweep.mesh.position.set(p.x, sw.height, p.z);
       break;
     }
     case "summon_adds": {
@@ -1230,7 +1270,25 @@ function frameBody(now) {
       const events = enemies.update(dt, player, G.arena, s2);
       for (const ev of events) {
         if (ev.type === "hitPlayer") { damagePlayer(ev.dmg, ev.projectile ? "projectile" : ("melee:" + (ev.src?.archetype ?? "?"))); if (ev.src && G.run.stats.thorns) { const hp = Math.max(0, ev.src.hp - G.run.stats.thorns); enemies.damage(ev.src, G.run.stats.thorns, hp, hp <= 0) && onKill(ev.src, { damage: 0 }); } }
-        else if (ev.type === "bossTelegraph") { toast(ev.text, true, Math.round(ev.secs * 1000)); SFX.ui(); }
+        else if (ev.type === "bossTelegraph") {
+          toast(ev.text, true, Math.round(ev.secs * 1000)); SFX.ui();
+          // The tell lives in the world, where the dodge does. A toast at the
+          // screen edge is read by nobody who is currently being shot at.
+          clearBossTell();
+          if (ev.shape === "sweep_beam") {
+            const sw = ev.sweep ?? { range: 22, height: 1.15 };
+            const ghost = makeBeamMesh(sw.range, 0.16);
+            ghost.position.set(ev.pos.x, sw.height, ev.pos.z);
+            G.bossTell = { mesh: ghost, t: 0, dur: ev.secs, kind: "beam", origin: ev.pos.clone(), height: sw.height };
+          } else if (ev.kind === "area" || ev.shape === "shockwave") {
+            const r = ev.shape === "shockwave" ? 9 : 7;
+            const ring = new THREE.Mesh(new THREE.RingGeometry(r - 0.25, r, 48),
+              new THREE.MeshBasicMaterial({ color: 0xff3a1e, transparent: true, opacity: 0.0, side: THREE.DoubleSide }));
+            ring.rotation.x = -Math.PI / 2; ring.position.set(ev.pos.x, 0.05, ev.pos.z);
+            scene.add(ring);
+            G.bossTell = { mesh: ring, t: 0, dur: ev.secs, kind: "ring" };
+          }
+        }
         else if (ev.type === "bossAttack") { onBossAttack(ev); }
         else if (ev.type === "dropMine") { hazards.addMine(ev.x, ev.z, ev.damage); SFX.ui(); }
         else if (ev.type === "popperBoom") { const d = player.pos.distanceTo(ev.pos); if (d < ev.r) damagePlayer(ev.dmg * (1 - d / ev.r), "popper"); explode(ev.pos, ev.r, ev.dmg * 0.5); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive && !wavesPending()) onRoomCleared(); }
@@ -1249,6 +1307,45 @@ function frameBody(now) {
       }
       if (!slowed) player.speedMult = Math.min(1, player.speedMult + dt * 2);
       // singularity: pull enemies toward the point for its lifetime
+      if (G.bossTell) {
+        const bt = G.bossTell; bt.t += dt;
+        const k = Math.min(1, bt.t / Math.max(0.01, bt.dur));
+        if (bt.kind === "beam") {
+          // Track the player through the charge: where the sweep will begin is
+          // honest information, refreshed as you move.
+          const toPlayer = Math.atan2(player.pos.x - bt.origin.x, player.pos.z - bt.origin.z);
+          bt.mesh.rotation.y = toPlayer;
+          bt.mesh.material.opacity = 0.08 + k * 0.3;
+        } else {
+          bt.mesh.material.opacity = 0.15 + k * 0.5 + Math.sin(bt.t * 18) * 0.08;
+        }
+        if (bt.t >= bt.dur) clearBossTell();
+      }
+      if (G.beamSweep) {
+        const bs = G.beamSweep; bs.t += dt;
+        const k = Math.min(1, bs.t / bs.dur);
+        const prevA = bs.a + bs.arc * Math.max(0, (bs.t - dt) / bs.dur);
+        const curA = bs.a + bs.arc * k;
+        bs.mesh.rotation.y = curA;
+        bs.mesh.material.opacity = 0.85 * (1 - k * 0.25);
+        if (!bs.hit) {
+          const dx = player.pos.x - bs.origin.x, dz = player.pos.z - bs.origin.z;
+          const d = Math.hypot(dx, dz);
+          const playerA = Math.atan2(dx, dz);
+          if (d < bs.range && angleCrossed(prevA, curA, playerA)) {
+            // The beam rides at torso height. player.pos.y is EYE height -
+            // 1.7 at rest - so "above the beam" means feet well off the floor:
+            // grounded always hits, and an early-jump crouch-graze still hits.
+            // A full jump (apex ~2m of feet height) clears it with margin.
+            if ((player.onGround ?? true) || player.pos.y < 2.6) {
+              bs.hit = true;
+              damagePlayer(bs.dmg, "beam");
+              fx.trauma(0.4);
+            }
+          }
+        }
+        if (bs.t >= bs.dur) clearBeamSweep();
+      }
       if (G.singularity) {
         G.singularity.t -= dt;
         for (const e of enemies.list) { if (!e.alive) continue; const d = singularityPull(G.singularity.pos, e.mesh.position, 6, 14, dt); e.mesh.position.x += d.x; e.mesh.position.z += d.z; }
@@ -1302,7 +1399,7 @@ function frameBody(now) {
     if (R.grade) R.grade.uniforms.uDamage.value = G.dmgFlash * 0.55;
     // Footfalls, paced by actual ground speed.
     const gsp = Math.hypot(player.vel.x, player.vel.z);
-    if (gsp > 1.5 && (player.grounded ?? true)) {
+    if (gsp > 1.5 && (player.onGround ?? true)) {
       G.stepPhase = (G.stepPhase ?? 0) + dt * gsp * 0.42;
       if (G.stepPhase >= 1) { G.stepPhase = 0; footstep(gsp / 7); }
     }
