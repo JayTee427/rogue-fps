@@ -41,6 +41,7 @@ import { TIERS } from "core/quality.js";
 import { chainTargets, singularityPull, explosionVictims } from "core/fxitems.js";
 import { ACHIEVEMENTS, checkAchievements, newAchievementState } from "core/achievements.js";
 import { newTable, qualifies, rank, addEntry, sanitizeInitials, serializeTable, deserializeTable, topLine, MAX_ENTRIES } from "core/hof.js";
+import { UNLOCKS, newProfile, applyRun, grantsFor, serializeProfile, deserializeProfile, profileSummary } from "core/meta.js";
 
 // ------------------------------------------------------------------ boot --
 const $ = (s) => document.querySelector(s);
@@ -68,6 +69,43 @@ const fx = new FX(scene, camera, TIERS[tierName]);
 const hazards = new HazardView(scene);
 let music = null;
 let hof = deserializeTable(localStorage.getItem("hs_hof"));
+
+// The pilot currently signed in, or null for an anonymous run. Profiles are keyed
+// by initials in localStorage - a shared cabinet, not an account system.
+let pilot = null;
+let profile = newProfile();
+
+const profileKey = (initials) => `hs_pilot_${sanitizeInitials(initials)}`;
+
+function signIn(initials) {
+  pilot = sanitizeInitials(initials);
+  profile = deserializeProfile(localStorage.getItem(profileKey(pilot)));
+  saveProfile();
+  updatePilotLine();
+}
+
+function signOut() {
+  pilot = null;
+  profile = newProfile();
+  updatePilotLine();
+}
+
+function saveProfile() {
+  if (pilot) localStorage.setItem(profileKey(pilot), serializeProfile(profile));
+}
+
+function updatePilotLine() {
+  const el = $("#pilotLine");
+  if (!el) return;
+  if (!pilot) { el.textContent = ""; return; }
+  const g = grantsFor(profile);
+  const bits = [];
+  if (g.weapons.length) bits.push(`${g.weapons.length} weapon${g.weapons.length > 1 ? "s" : ""}`);
+  if (g.items.length) bits.push(`${g.items.length} item${g.items.length > 1 ? "s" : ""}`);
+  if (g.gold) bits.push(`${g.gold} salvage`);
+  if (g.maxHp) bits.push(`+${g.maxHp} hp`);
+  el.textContent = `${pilot} — ${profileSummary(profile).text}${bits.length ? " · carrying " + bits.join(", ") : ""}`;
+}
 // Achievements are earned WITHIN a run and travel with the score. Nothing
 // carries between players, because the next player is a stranger.
 let achState = newAchievementState();
@@ -166,6 +204,7 @@ function commitEntry() {
   $("#repRank").textContent = `${initials} RECORDED`;
   SFX.pickup();
   renderHof();
+  updatePilotLine();
 }
 
 function renderHof() {
@@ -199,6 +238,21 @@ function toast(text, warn = false, ms = 1400) {
 function beginRun(seed, cursesEnabled) {
   initAudio(); resumeAudio();
   G.run = newRun(seed, { cursesEnabled });
+  // Everything the signed-in pilot has unlocked, applied before the first room.
+  // An anonymous run gets none of it, which is the point: a stranger opening the
+  // link plays the honest base game.
+  const boons = grantsFor(profile);
+  if (boons.weapons.length) {
+    const pick = boons.weapons[boons.weapons.length - 1];
+    G.run = swapWeapon(G.run, rollWeapon(makeRng(seed).fork("startgun"), pick, 1));
+  }
+  if (boons.items.length) {
+    G.run = { ...G.run, held: [...G.run.held, ...boons.items.filter((id) => ITEM_BY_ID[id])] };
+  }
+  if (boons.gold) G.run = { ...G.run, gold: (G.run.gold ?? 0) + boons.gold };
+  if (boons.rerolls) G.run = { ...G.run, rerolls: (G.run.rerolls ?? 0) + boons.rerolls };
+  if (boons.maxHp) G.run = { ...G.run, maxHp: G.run.maxHp + boons.maxHp };
+  if (boons.draftSize) G.run = { ...G.run, stats: { ...G.run.stats, draftSize: (G.run.stats.draftSize ?? 3) + boons.draftSize } };
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
   G.runStartedAt = performance.now();
@@ -748,6 +802,19 @@ function endRun(kind) {
   $("#repAch").innerHTML = earned.map((id) => `<span class="ach">${ACHIEVEMENTS[id]?.name ?? id}</span>`).join("");
 
   // Made the board? Take three letters, arcade style.
+  if (pilot) {
+    const res = applyRun(profile, {
+      floorsCleared: r.depthReached, roomsCleared: r.roomsCleared, kills: r.kills,
+      bossesKilled: r.bossesKilled ?? 0, extracted: kind === "extracted",
+      score: sc, itemsHeld: r.held, secs,
+    });
+    profile = res.profile;
+    saveProfile();
+    if (res.newlyUnlocked.length) {
+      const names = res.newlyUnlocked.map((id) => UNLOCKS[id]?.name ?? id).join(" · ");
+      setTimeout(() => toast(`UNLOCKED — ${names}`, false, 4200), 700);
+    }
+  }
   G.pendingEntry = qualifies(hof, sc)
     ? { score: sc, floor: r.depthReached, kills: r.kills, secs,
         extracted: kind === "extracted", achievements: earned }
@@ -757,7 +824,7 @@ function endRun(kind) {
   $("#initialsRow").classList.toggle("hidden", !G.pendingEntry);
   if (G.pendingEntry) {
     const box = $("#initials");
-    box.value = "";
+    box.value = pilot ?? "";   // a signed-in pilot does not retype their name
     setTimeout(() => box.focus(), 120);
   }
   show("#report");
@@ -1188,6 +1255,17 @@ $("#btnRun").addEventListener("click", () => {
 });
 $("#btnProgress").addEventListener("click", () => { renderHof(); show("#hof"); });
 $("#btnHofClose").addEventListener("click", () => menu());
+$("#btnContinue").addEventListener("click", () => { $("#signinRow").classList.toggle("hidden"); const b = $("#pilotInitials"); if (b) { b.value = pilot ?? ""; setTimeout(() => b.focus(), 60); } });
+$("#btnSignIn").addEventListener("click", () => {
+  const v = $("#pilotInitials")?.value;
+  if (!v || !v.trim()) return;
+  signIn(v);
+  $("#signinRow").classList.add("hidden");
+  SFX.ui();
+});
+$("#btnSignOut").addEventListener("click", () => { signOut(); SFX.ui(); });
+$("#pilotInitials").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3); });
+$("#pilotInitials").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#btnSignIn").click(); });
 $("#btnEnter").addEventListener("click", commitEntry);
 $("#initials").addEventListener("keydown", (e) => { if (e.key === "Enter") commitEntry(); });
 $("#initials").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3); });

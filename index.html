@@ -158,6 +158,11 @@
     #initialsRow.hidden{display:none}
     #initials{width:120px;font-family:inherit;font-size:26px;letter-spacing:.3em;text-align:center;text-transform:uppercase;
       background:#0c0f14;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:6px 4px}
+    #pilotLine{color:var(--accent);font-size:12px;letter-spacing:.08em;margin:4px 0}
+    #signinRow{display:flex;gap:8px;align-items:center;justify-content:center;margin:8px 0}
+    #signinRow.hidden{display:none}
+    #pilotInitials{width:96px;font-family:inherit;font-size:20px;letter-spacing:.28em;text-align:center;text-transform:uppercase;
+      background:#0c0f14;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:5px 4px}
     .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
     .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
     #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
@@ -226,13 +231,19 @@
     <p>You are a salvage drone dropped into a derelict station whose rooms rearrange between visits. Fight through it with a gun that changes every time you find something. Extract, or go deeper.</p>
     <div class="row">
       <button class="big" id="btnRun">New Run</button>
-      <button class="big ghost" id="btnDaily">Daily Seed</button><button class="big ghost" id="btnProgress">Hall of Fame</button>
+      <button class="big ghost" id="btnDaily">Daily Seed</button><button class="big ghost" id="btnContinue">Continue Mission</button><button class="big ghost" id="btnProgress">Hall of Fame</button>
     </div>
     <div class="row">
       <input class="seed" id="seedInput" placeholder="SEED (optional)" maxlength="10" />
       <label class="chk"><input type="checkbox" id="chkCurses" /> allow cursed items</label>
     </div>
     <div class="sub" id="menuHint">WASD · mouse · shift dash · space jump · R reload · click to lock</div>
+    <div id="signinRow" class="hidden">
+      <input id="pilotInitials" maxlength="3" autocomplete="off" spellcheck="false" placeholder="AAA" aria-label="pilot initials">
+      <button class="big" id="btnSignIn">Sign In</button>
+      <button class="big ghost" id="btnSignOut">Anonymous</button>
+    </div>
+    <div id="pilotLine"></div>
     <div class="sub" id="bestLine"></div>
   </div>
 
