@@ -34,6 +34,7 @@ import { WeaponView } from "./weaponView.js";
 import { EnemyManager } from "./enemies.js";
 import { initAudio, resumeAudio, SFX, duckMusic, setListener, at as playAt, footstep } from "./audio.js";
 import { MusicPlayer } from "./musicPlayer.js";
+import { log as tlog, startRun as tStartRun, flushNow as tFlush } from "./telemetry.js";
 import { FX } from "./fx.js";
 import { HazardView } from "./hazardView.js";
 import { TIERS } from "core/quality.js";
@@ -208,6 +209,7 @@ function beginRun(seed, cursesEnabled) {
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
   G.runStartedAt = performance.now();
+  tStartRun(G.seedText, { curses: !!G.run.cursesEnabled });
   frameErrors = 0;
   G.runDamageTaken = 0; G.runHeadshots = 0;
   SFX.startAmbient();
@@ -304,6 +306,13 @@ function enterRoom() {
   weaponView.equip(r.weapon);
   renderItems();
   addGold(0);                    // refresh the readout
+  tlog("room_enter", {
+    floor: r.floor, room: r.roomIndex + 1, biome: G.biome,
+    hazard: room.hazardTag ?? null, modifier: room.modifier ?? null,
+    reward: room.rewardType, elites: room.eliteCount,
+    enemies: enemies.list.length + (G.wavePlan?.waves ?? []).reduce((a, w) => a + w.spawns.length, 0),
+    hp: Math.round(G.hp), maxHp: G.run.maxHp, items: G.run.held.length, gold: G.run.gold ?? 0,
+  });
   show("#hud");
   input.requestLock();
 }
@@ -390,12 +399,23 @@ function applyStats() {
 }
 
 function onRoomCleared() {
+  // Three separate call sites can reach this, and one of them did not check
+  // whether the room was already clear - so a room could pay its gold and
+  // re-rate the player's skill several times. Found by the play telemetry.
+  if (G.roomCleared) return;
   G.roomCleared = true; G.roomActive = false;
   G.wavePlan = null;
   // Rate the room and let the director push harder or ease off next time.
   const st = G.roomStats ?? {};
   G.skill = updateSkill(G.skill, { clearedSecs: st.secs ?? 0, damageTaken: st.damageTaken ?? 0, accuracy: st.shotsFired ? st.shotsHit / st.shotsFired : 0.5 });
   localStorage.setItem("hs_skill", String(G.skill));
+  tlog("room_clear", {
+    floor: G.run.floor, room: G.run.roomIndex + 1,
+    secs: Math.round((G.roomStats?.secs ?? 0) * 10) / 10,
+    kills: G.killsThisRoom, damageTaken: Math.round(G.roomStats?.damageTaken ?? 0),
+    accuracy: G.roomStats?.shotsFired ? Math.round((G.roomStats.shotsHit / G.roomStats.shotsFired) * 100) : null,
+    hpLeft: Math.round(G.hp), skill: Math.round((G.skill ?? 0) * 100) / 100,
+  });
   addGold(15 + G.run.floor * 5);
   const won = roomChallengeEnd();
   if (won) {
@@ -712,6 +732,13 @@ function endRun(kind) {
   $("#repSeed").textContent = `SEED ${G.seedText}`;
   show("#report");
   if (kind === "dead") SFX.death();
+  tlog("run_end", {
+    kind, floor: r.depthReached, rooms: r.roomsCleared, kills: r.kills,
+    score: sc, items: r.held, weapon: r.weapon?.archetype,
+    secs: Math.round((performance.now() - (G.runStartedAt ?? performance.now())) / 1000),
+    lastDamage: G.lastDamageWhy ?? null,
+  });
+  tFlush();
   // Meta-progression: totals and unlocks survive the run. itemsHeld is the
   // ARRAY, not its length — meta.js counts it itself.
   // Achievements read the same summary the profile does.
@@ -761,6 +788,7 @@ function renderItems() {
 
 // ---------------------------------------------------------------- damage --
 function damagePlayer(amount, why = "?") {
+  G.lastDamageWhy = why;
   if (G.roomStats) G.roomStats.damageTaken += amount;
   G.runDamageTaken = (G.runDamageTaken ?? 0) + amount;
   if (G.invuln > 0 || !G.roomActive) return;
@@ -793,6 +821,18 @@ function damagePlayer(amount, why = "?") {
       break;
     }
   }
+  tlog("damage", {
+    why, amount: Math.round(amount * 10) / 10, hpAfter: Math.round(G.hp - amount),
+    floor: G.run.floor, room: G.run.roomIndex + 1,
+    // how far the nearest live enemy was: "hit from across the room" and "hit
+    // while surrounded" are different problems with the same HP loss
+    nearest: (() => {
+      let d = Infinity;
+      for (const e of enemies.list) if (e.alive) d = Math.min(d, e.mesh.position.distanceTo(player.pos));
+      return Number.isFinite(d) ? Math.round(d * 10) / 10 : null;
+    })(),
+    alive: enemies.aliveCount,
+  });
   G.hp -= amount; G.invuln = 0.35; G.dmgFlash = 1;
   fx.trauma(Math.min(0.85, 0.28 + amount / 40));
   SFX.hurt(Math.max(0, G.hp) / G.run.maxHp);
