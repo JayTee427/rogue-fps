@@ -647,7 +647,13 @@ function openDoors() {
   doors.forEach((d, i) => {
     const c = document.createElement("div"); c.className = "card";
     const p = d.preview;
-    c.innerHTML = `<h3>DOOR ${i + 1}</h3><div><span class="tag">${p.rewardType.toUpperCase()}</span>${p.hazardTag ? `<span class="tag">${p.hazardTag.replace("_", " ").toUpperCase()}</span>` : ""}${p.hasElite ? '<span class="tag elite">ELITE</span>' : ""}</div>`;
+    // Tags say what they are. Three bare words in a row read as noise; a
+    // labelled loot line, a labelled hazard and a warning read as a choice.
+    const bits = [`<span class="tag loot">LOOT: ${p.rewardType.toUpperCase()}</span>`];
+    if (p.hazardTag) bits.push(`<span class="tag hazard">HAZARD: ${p.hazardTag.replace("_", " ").toUpperCase()}</span>`);
+    if (p.modifier) bits.push(`<span class="tag hazard">${String(p.modifier).replace("_", " ").toUpperCase()}</span>`);
+    if (p.hasElite) bits.push('<span class="tag elite">ELITE GUARD</span>');
+    c.innerHTML = `<h3>DOOR ${i + 1}</h3><div>${bits.join("")}</div>`;
     c.addEventListener("click", () => { SFX.door(); G.run = chooseDoor(G.run, i); enterRoom(); });
     wrap.appendChild(c);
   });

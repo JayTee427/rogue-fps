@@ -111,8 +111,18 @@ export function chooseDoor(run, index) {
   if (!room || !Array.isArray(room.doors) || index < 0 || index >= room.doors.length) {
     throw new Error("chooseDoor: invalid door index");
   }
+  // The chosen door's room becomes the next room. Without this, the choice
+  // was decorative - every door opened onto the same pre-generated corridor.
+  const door = room.doors[index];
+  let currentFloor = run.currentFloor;
+  if (door.room) {
+    const rooms = [...currentFloor.rooms];
+    rooms[run.roomIndex + 1] = door.room;
+    currentFloor = { ...currentFloor, rooms };
+  }
   return {
     ...run,
+    currentFloor,
     roomIndex: run.roomIndex + 1,
     phase: "room",
   };

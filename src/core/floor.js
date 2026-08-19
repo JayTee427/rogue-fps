@@ -77,20 +77,31 @@ export function generateFloor(rng, floorIndex, run) {
   }
 
   for (let i = 0; i < 4; i++) {
-    const nextRoom = rooms[i + 1];
+    // Each door leads to its own candidate room; choosing the door is what
+    // makes that room real. Every door used to lead to the same generated
+    // room with the same preview - three copies of one door, a choice that
+    // chose nothing. Candidates reroll a few times to avoid identical twins,
+    // though the rng is allowed to insist.
     const doorCount = rng.int(2, 3);
-    const doors = [];
+    const candidates = [];
+    const sigs = new Set();
     for (let j = 0; j < doorCount; j++) {
-      doors.push({
-        leadsTo: i + 1,
-        preview: {
-          rewardType: nextRoom.rewardType,
-          hazardTag: nextRoom.hazardTag,
-          hasElite: nextRoom.eliteCount > 0
-        }
-      });
+      let cand = generateRoom(rng, floorIndex, i + 1);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const sig = `${cand.rewardType}|${cand.hazardTag}|${cand.eliteCount > 0}|${cand.modifier}`;
+        if (!sigs.has(sig)) { sigs.add(sig); break; }
+        cand = generateRoom(rng, floorIndex, i + 1);
+      }
+      candidates.push(cand);
     }
-    rooms[i].doors = doors;
+    rooms[i].doors = candidates.map((c) => ({
+      leadsTo: i + 1,
+      room: c,
+      preview: { rewardType: c.rewardType, hazardTag: c.hazardTag, hasElite: c.eliteCount > 0, modifier: c.modifier },
+    }));
+    // Until a door is chosen, the first candidate stands in as the next room,
+    // so anything that reads the floor plan before the choice stays coherent.
+    rooms[i + 1] = candidates[0];
   }
 
   rooms[4].doors = [

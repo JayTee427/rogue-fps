@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generateFloor, ROOM_MODIFIERS, HAZARD_TAGS, BOSSES } from "core/floor.js";
 import { rng } from "core/rng.js";
+import { newRun, startFloor, clearRoom, takeReward, chooseDoor } from "core/run.js";
 
 const run = (over = {}) => ({ held: [], stats: { doorLookahead: 0 }, ...over });
 
@@ -71,17 +72,20 @@ describe("generateFloor", () => {
     expect(f.rooms[4].doors[0].leadsTo).toBe("boss");
   });
 
-  it("door previews are truthful: each door's preview matches the room it leads to", () => {
+  it("door previews are truthful: each door previews ITS OWN room", () => {
     for (let s = 0; s < 40; s++) {
       const f = generateFloor(rng(s), 2, run());
       for (let i = 0; i < 4; i++) {
         for (const d of f.rooms[i].doors) {
           expect(d.leadsTo).toBe(i + 1);
-          const next = f.rooms[i + 1];
-          expect(d.preview.rewardType).toBe(next.rewardType);
-          expect(d.preview.hazardTag).toBe(next.hazardTag);
-          expect(d.preview.hasElite).toBe(next.eliteCount > 0);
+          expect(d.room, "door carries no room").toBeTruthy();
+          expect(d.preview.rewardType).toBe(d.room.rewardType);
+          expect(d.preview.hazardTag).toBe(d.room.hazardTag);
+          expect(d.preview.hasElite).toBe(d.room.eliteCount > 0);
         }
+        // the stand-in next room is the first candidate, so the plan is
+        // coherent before any door is chosen
+        expect(f.rooms[i + 1]).toBe(f.rooms[i].doors[0].room);
       }
     }
   });
@@ -134,5 +138,39 @@ describe("generateFloor", () => {
     const before = JSON.stringify(r0);
     generateFloor(rng(1), 1, r0);
     expect(JSON.stringify(r0)).toBe(before);
+  });
+});
+
+describe("doors are a real choice", () => {
+  it("most rooms offer at least two distinct previews", () => {
+    // The rng may occasionally insist on twins; over 40 seeds x 4 rooms the
+    // overwhelming majority must differ or the choice is still theater.
+    let distinct = 0, total = 0;
+    for (let s = 0; s < 40; s++) {
+      const f = generateFloor(rng(s), 2, run());
+      for (let i = 0; i < 4; i++) {
+        total++;
+        const sigs = new Set(f.rooms[i].doors.map((d) => JSON.stringify(d.preview)));
+        if (sigs.size > 1) distinct++;
+      }
+    }
+    expect(distinct / total).toBeGreaterThan(0.8);
+  });
+
+  it("choosing a door installs that door's room", () => {
+    for (let s = 1; s <= 10; s++) {
+      let r = newRun(s, {});
+      r = startFloor(r);                           // generates the floor plan
+      r = clearRoom(r);
+      r = takeReward(r, null);                     // skip the draft
+      const doors = r.currentFloor.rooms[r.roomIndex].doors;
+      const pick = doors.length - 1;               // deliberately not the default
+      const promised = doors[pick].room;
+      r = chooseDoor(r, pick);
+      const installed = r.currentFloor.rooms[r.roomIndex];
+      expect(installed.rewardType).toBe(promised.rewardType);
+      expect(installed.hazardTag).toBe(promised.hazardTag);
+      expect(installed.eliteCount).toBe(promised.eliteCount);
+    }
   });
 });
