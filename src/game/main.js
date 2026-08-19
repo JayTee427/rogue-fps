@@ -328,13 +328,26 @@ function onFloorStart(first = false) {
   // offer extract vs deeper
   $("#fsTitle").textContent = `FLOOR ${r.floor}`;
   const s = scoreRun(r).total;
-  $("#fsText").textContent = `Banking now scores ${s.toLocaleString()}. Going deeper multiplies everything — and everything hits harder.`;
+  $("#fsText").textContent = `Banking now scores ${s.toLocaleString()}. Descending repairs ${Math.round(r.maxHp * FLOOR_REPAIR)} HP and multiplies everything — and everything hits harder.`;
   input.releaseLock();
   show("#floorStart");
 }
 
+// A floor should be a fresh test, not a continuation of the fight before it.
+// Without this, the boss's damage is carried straight into a larger opening
+// room: the reported run finished the floor-1 boss on 29hp and was dead two
+// seconds into floor 2, killed by a popper and one projectile. Deliberately not
+// a full heal - attrition within a floor is the part worth keeping.
+const FLOOR_REPAIR = 0.4;
+
 function enterFloor() {
   G.run = startFloor(G.run);
+  if (G.run.floor > 1) {
+    const before = G.hp;
+    G.hp = Math.min(G.run.maxHp, G.hp + Math.round(G.run.maxHp * FLOOR_REPAIR));
+    const gained = Math.round(G.hp - before);
+    if (gained > 0) setTimeout(() => toast(`REPAIRS — +${gained} HP`, false, 2600), 600);
+  }
   SFX.door();
   enterRoom();
 }
