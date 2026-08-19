@@ -5,7 +5,7 @@
 import * as THREE from "three";
 import { $, toast, G, R, renderer, scene, camera, render, player, input, weaponView, enemies, fx, hazards, audio, isMobile } from "./context.js";
 import { fire, onKill, onBossAttack, damagePlayer, heal, clearBossTell, clearBeamSweep, explode, makeBeamMesh } from "./combat.js";
-import { pumpWaves, wavesPending, onRoomCleared, menu, openDraft, onBossDown, enterBoss, recomputeStats, maybeHint } from "./flow.js";
+import { pumpWaves, wavesPending, onRoomCleared, menu, openDraft, onBossDown, enterBoss, recomputeStats, maybeHint, addGold } from "./flow.js";
 import { angleCrossed } from "core/bosspatterns.js";
 import { SFX, setListener, footstep } from "./audio.js";
 import { log as tlog, flushNow as tFlush, telemetryOn } from "./telemetry.js";
@@ -123,6 +123,7 @@ function frameBody(now) {
           else { G.hazardAcc = (G.hazardAcc ?? 0) + ev.amount; if (G.hazardAcc >= 4) { const a = G.hazardAcc; G.hazardAcc = 0; G.invuln = 0; damagePlayer(a, "hazard:" + ev.source); } }
           if (Math.random() < dt * 10) fx.burn(new THREE.Vector3(player.pos.x, 0.25, player.pos.z));
         } else if (ev.type === "slow") { player.speedMult = Math.min(player.speedMult, 1 - ev.amount); slowed = true; }
+        else if (ev.type === "turretDown") { fx.explosion(new THREE.Vector3(ev.x, ev.y ?? 1.1, ev.z), 1.4); SFX.explosion(0.8); addGold(4); toast("TURRET DOWN", false, 1200); }
         else if (ev.type === "explode") { const d = Math.hypot(player.pos.x - ev.x, player.pos.z - ev.z); if (d < ev.radius) damagePlayer(ev.damage * (1 - d / ev.radius), "mine"); explode(new THREE.Vector3(ev.x, 0.5, ev.z), ev.radius, ev.damage * 0.6); }
       }
       if (!slowed) player.speedMult = Math.min(1, player.speedMult + dt * 2);

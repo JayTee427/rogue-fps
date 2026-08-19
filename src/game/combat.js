@@ -8,6 +8,7 @@ import { $, toast, G, player, input, weaponView, enemies, fx, hazards, scene } f
 import { SFX, duckMusic, at as playAt } from "./audio.js";
 import { log as tlog } from "./telemetry.js";
 import { resolveHit } from "core/combat.js";
+import { damageHazard, hazardRayHit } from "core/hazards.js";
 import { die } from "core/run.js";
 import { COLORS } from "./renderer.js";
 import { aimAssist } from "core/assist.js";
@@ -112,6 +113,21 @@ function fire(want, dt) {
   let selfBurn = 0;                      // soulfire/volatile: dealt damage that recoils
   for (const ray of shot.rays) {
     const hits = enemies.raycast(origin, ray.dir, 120, pierce >= 99 ? 50 : pierce);
+    // Turrets and mines are shootable. A hazard closer than the first enemy
+    // absorbs the ray: turrets soak hull damage, an armed mine detonates -
+    // which is the safe way to clear one.
+    const hz = hazardRayHit(hazards.hazards, origin, ray.dir, 120);
+    if (hz && (!hits.length || hz.t < hits[0].t)) {
+      const res = damageHazard(hazards.hazards, hz.id, (r.weapon.stats.damage ?? 10) * (r.stats.damage ?? 1));
+      hazards.hazards = res.hazards;
+      hazards.inject(res.events);
+      const hp = origin.clone().addScaledVector(ray.dir, hz.t);
+      fx.hit(hp, ray.dir, false);
+      if (hz.kind === "turrets") SFX.hit(); else SFX.kill();
+      anyHit = true;
+      if (!shot.beam || G.roomRng.next() < 0.5) weaponView.spawnTracer(origin.clone().add(new THREE.Vector3(0.2, -0.15, 0)), hp.clone(), 0xffd080, 0.025, 0.08);
+      continue;                                   // the hazard absorbs this ray
+    }
     _end.copy(origin).addScaledVector(ray.dir, hits.length ? hits[hits.length - 1].t : 60);
     if (!shot.beam || G.roomRng.next() < 0.5) weaponView.spawnTracer(origin.clone().add(new THREE.Vector3(0.2, -0.15, 0)), _end.clone(), shot.beam ? COLORS.accent2 : 0xffd080, shot.beam ? 0.05 : 0.025, shot.beam ? 0.05 : 0.08);
     for (const h of hits) {

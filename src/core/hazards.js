@@ -20,7 +20,7 @@ function rejectNearPlayer(x, z, halfW, halfD, rng) {
 
 export const HAZARD_DEFS = {
   lava_floor: { name: "Lava Floor", desc: "Burns anything that steps in it." },
-  turrets: { name: "Turrets", desc: "Automated gun turrets that shoot intruders." },
+  turrets: { name: "Turrets", desc: "Automated gun turrets. They can be shot apart." },
   mines: { name: "Mines", desc: "Proximity mines that explode on contact." },
   acid_pools: { name: "Acid Pools", desc: "Pools of corrosive acid that slow and damage." },
   collapsing: { name: "Collapsing Floor", desc: "Unstable floor that collapses underfoot." }
@@ -52,7 +52,7 @@ export function spawnHazards(rng, tag, arena, floor) {
     } else if (tag === "acid_pools") {
       h = { id, kind: tag, x, z, radius: rng.int(20, 30) / 10, dps: 8 + 2 * d, slow: 0.4 };
     } else if (tag === "turrets") {
-      h = { id, kind: tag, x, z, radius: 0.7, range: 16, cd: 1.5, cdMax: 1.6, damage: 10 + 2 * d, y: 1.2 };
+      h = { id, kind: tag, x, z, radius: 0.7, range: 16, cd: 1.5, cdMax: 1.6, damage: 10 + 2 * d, y: 1.2, hp: 30 + 8 * d };
     } else if (tag === "mines") {
       h = { id, kind: tag, x, z, radius: 1.4, armed: true, damage: 35 + 5 * d, blast: 3.5 };
     } else if (tag === "collapsing") {
@@ -67,6 +67,52 @@ export function spawnHazards(rng, tag, arena, floor) {
     if (!buried) hazards.push(h);
   }
   return hazards;
+}
+
+/** Damage one hazard by id. Turrets soak it and die into a wreck; an armed
+ *  mine detonates on any hit, which is the point of shooting it from range.
+ *  Pure: returns the new hazards list plus the events the hit caused. */
+export function damageHazard(hazards, id, dmg) {
+  const events = [];
+  const out = [];
+  for (const h of hazards) {
+    if (h.id !== id) { out.push(h); continue; }
+    if (h.kind === "turrets" && !h.dead) {
+      const hp = (h.hp ?? 30) - dmg;
+      if (hp <= 0) {
+        events.push({ type: "turretDown", x: h.x, y: h.y ?? 1.2, z: h.z, source: h.id });
+        out.push({ ...h, hp: 0, dead: true });
+      } else {
+        out.push({ ...h, hp });
+      }
+    } else if (h.kind === "mines" && h.armed) {
+      events.push({ type: "explode", x: h.x, z: h.z, radius: h.blast, damage: h.damage, source: h.id });
+      // consumed: the mesh removal rides the same vanished-id sweep mines already use
+    } else {
+      out.push(h);
+    }
+  }
+  return { hazards: out, events };
+}
+
+/** Nearest shootable hazard along a ray, or null. Sphere tests: a live turret
+ *  is a head-sized target at its mount height; an armed mine is a low disc.
+ *  Pure math so the suite can hold the geometry. */
+export function hazardRayHit(hazards, origin, dir, maxDist = 120) {
+  let best = null;
+  for (const h of hazards) {
+    let cy, r;
+    if (h.kind === "turrets" && !h.dead) { cy = (h.y ?? 1.2); r = 0.55; }
+    else if (h.kind === "mines" && h.armed) { cy = 0.12; r = 0.45; }
+    else continue;
+    const ox = h.x - origin.x, oy = cy - origin.y, oz = h.z - origin.z;
+    const t = ox * dir.x + oy * dir.y + oz * dir.z;          // closest approach
+    if (t < 0 || t > maxDist) continue;
+    const px = origin.x + dir.x * t - h.x, py = origin.y + dir.y * t - cy, pz = origin.z + dir.z * t - h.z;
+    if (px * px + py * py + pz * pz > r * r) continue;
+    if (!best || t < best.t) best = { id: h.id, kind: h.kind, t, x: h.x, y: cy, z: h.z };
+  }
+  return best;
 }
 
 export function stepHazards(hazards, dt, player, rng) {
@@ -90,7 +136,7 @@ export function stepHazards(hazards, dt, player, rng) {
       updated.push(h);
     } else if (h.kind === "turrets") {
       const u = { ...h, cd: h.cd - dt };
-      if (dist <= h.range && u.cd <= 0) {
+      if (!u.dead && dist <= h.range && u.cd <= 0) {
         // 3-D aim: turrets sit at h.y and shoot at the player's eye height, so a
         // 2-D {x,z} direction would send every shot along the floor.
         const dx = player.x - h.x;

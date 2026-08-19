@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { spawnHazards, stepHazards, HAZARD_DEFS } from "core/hazards.js";
+import { spawnHazards, stepHazards, HAZARD_DEFS, damageHazard, hazardRayHit } from "core/hazards.js";
 import { rng } from "core/rng.js";
 
 // Room hazards as pure state machines. The renderer draws whatever is in the
@@ -151,5 +151,56 @@ describe("stepHazards", () => {
     const away = { ...player, x: tile.x + 10, z: tile.z + 10 };
     for (let i = 0; i < 300 && r.hazards.find(h => h.id === tile.id).state !== "hole"; i++) r = stepHazards(r.hazards, 0.05, away, rng(i));
     expect(r.hazards.find(h => h.id === tile.id).state).toBe("hole");
+  });
+});
+
+describe("hazards can be answered", () => {
+  const turret = (over = {}) => ({ id: "t0", kind: "turrets", x: 0, z: 10, radius: 0.7, range: 16, cd: 0, cdMax: 1.6, damage: 12, y: 1.2, hp: 30, ...over });
+  const mine = (over = {}) => ({ id: "m0", kind: "mines", x: 3, z: 3, radius: 1.4, armed: true, damage: 35, blast: 3.5, ...over });
+
+  it("a turret soaks hull damage and dies into a wreck", () => {
+    let hz = [turret()];
+    let r = damageHazard(hz, "t0", 12);
+    expect(r.hazards[0].hp).toBe(18);
+    expect(r.events).toEqual([]);
+    r = damageHazard(r.hazards, "t0", 12);
+    r = damageHazard(r.hazards, "t0", 12);
+    expect(r.hazards[0].dead).toBe(true);
+    expect(r.events[0].type).toBe("turretDown");
+    // a wreck takes no further damage and raises no further events
+    const again = damageHazard(r.hazards, "t0", 100);
+    expect(again.events).toEqual([]);
+  });
+
+  it("a dead turret never shoots again", () => {
+    const hz = [turret({ dead: true, hp: 0, cd: -1 })];
+    const r = stepHazards(hz, 0.016, { x: 0, y: 1.7, z: 5 }, rng(1));
+    expect(r.events.filter((e) => e.type === "shoot")).toEqual([]);
+  });
+
+  it("shooting an armed mine detonates it exactly once", () => {
+    const r = damageHazard([mine()], "m0", 5);
+    expect(r.events[0].type).toBe("explode");
+    expect(r.events[0].radius).toBe(3.5);
+    expect(r.hazards).toEqual([]);                 // consumed
+  });
+
+  it("hazardRayHit hits what the ray crosses and nothing else", () => {
+    const hz = [turret(), mine()];
+    // straight down +z from the player's eye: crosses the turret head at 10m
+    const hit = hazardRayHit(hz, { x: 0, y: 1.2, z: 0 }, { x: 0, y: 0, z: 1 }, 120);
+    expect(hit?.id).toBe("t0");
+    expect(hit.t).toBeCloseTo(10, 0);
+    // aimed well wide: nothing
+    expect(hazardRayHit(hz, { x: 0, y: 1.2, z: 0 }, { x: 1, y: 0, z: 0 }, 120)).toBe(null);
+    // a dead turret is scenery, not a target
+    expect(hazardRayHit([turret({ dead: true })], { x: 0, y: 1.2, z: 0 }, { x: 0, y: 0, z: 1 }, 120)).toBe(null);
+  });
+
+  it("spawned turrets carry hull points that scale with depth", () => {
+    const f1 = spawnHazards(rng(7), "turrets", { halfW: 14, halfD: 14, blocks: [] }, 1);
+    const f4 = spawnHazards(rng(7), "turrets", { halfW: 14, halfD: 14, blocks: [] }, 4);
+    for (const h of f1) expect(h.hp).toBe(30);
+    for (const h of f4) expect(h.hp).toBe(54);
   });
 });

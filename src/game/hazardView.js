@@ -90,6 +90,12 @@ export class HazardView {
   }
 
   /** returns events for the game loop: [{type:'damage'|'slow'|'explode'}, ...] — turret shots are handled here */
+  /** Events caused outside the step (a shot detonating a mine, a turret dying)
+   *  join the same outbound channel the step's own events use. */
+  inject(events) {
+    if (events?.length) (this._pending ??= []).push(...events);
+  }
+
   update(dt, player, arena, rng) {
     if (!this.hazards.length && !this.projectiles.length) return [];
     const t = performance.now() / 1000;
@@ -105,7 +111,7 @@ export class HazardView {
       const d = Math.hypot(player.pos.x - h.x, player.pos.z - h.z);
       if (h.kind === "lava_floor") { m.material.opacity = 0.7 + Math.sin(t * 3 + h.x) * 0.15; if (m.userData.light) m.userData.light.intensity = 3.5 + Math.sin(t * 5 + h.z) * 1.2; }
       else if (h.kind === "acid_pools") { m.material.opacity = 0.6 + Math.sin(t * 2 + h.z) * 0.1; }
-      else if (h.kind === "turrets") { const head = m.userData.head; if (d <= h.range) { head.lookAt(player.pos.x, 1.15, player.pos.z); head.material.emissive.setHex(0x661111); head.material.emissiveIntensity = h.cd < 0.4 ? 1.5 : 0.5; } else { head.rotation.y += dt * 0.6; head.material.emissiveIntensity = 0.1; } }
+      else if (h.kind === "turrets") { const head = m.userData.head; if (h.dead) { head.rotation.x = Math.min(0.9, (head.rotation.x || 0) + dt * 3); head.material.emissive.setHex(0); head.material.emissiveIntensity = 0; if (m.userData.eye) m.userData.eye.visible = false; } else if (d <= h.range) { head.lookAt(player.pos.x, 1.15, player.pos.z); head.material.emissive.setHex(0x661111); head.material.emissiveIntensity = h.cd < 0.4 ? 1.5 : 0.5; } else { head.rotation.y += dt * 0.6; head.material.emissiveIntensity = 0.1; } }
       else if (h.kind === "mines") { const rate = Math.max(2, 14 - d); m.material.emissiveIntensity = 0.3 + Math.max(0, Math.sin(t * rate)) * 1.2; }
       else if (h.kind === "collapsing") {
         if (h.state === "cracking") { m.material.color.setHex(0x8a4a30); m.material.emissive.setHex(0xff3000); m.material.emissiveIntensity = (1 - h.timer / 1.2) * 0.8; m.position.y = 0.06 + Math.sin(t * 40) * 0.015 * (1 - h.timer / 1.2); }
@@ -115,6 +121,7 @@ export class HazardView {
 
     // turret shots become projectiles here; other events pass through
     const out = [];
+    if (this._pending?.length) { out.push(...this._pending); this._pending.length = 0; }
     for (const ev of r.events) {
       if (ev.type === "shoot") {
         const mesh = new THREE.Mesh(this._geo.shot, new THREE.MeshBasicMaterial({ color: 0xff5050 }));
