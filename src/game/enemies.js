@@ -172,7 +172,16 @@ export class EnemyManager {
       mesh.add(ring);
       mesh.userData.floorRing = ring;
       if (A === "armoured") {
-        const plate = new THREE.Mesh(look.geo(), new THREE.MeshLambertMaterial({ color: 0x9aa6b8, flatShading: true, wireframe: true }));
+        // MeshBasic, deliberately: Lambert + flatShading + wireframe computes flat
+        // normals from screen-space derivatives, which are undefined on LINE
+        // primitives - the lighting goes NaN and the bloom pass smears that NaN
+        // into a screen-filling black rectangle. That combination was the
+        // "black square" that stalked every playtest for two weeks: it only
+        // appears when an ARMOURED elite is on screen, it moves with the enemy,
+        // and its stepped edges are the bloom mip pyramid. A wireframe cage
+        // does not need lighting; unlit renders the same look with no normals
+        // to poison. Guarded by tests/integration/materials.test.js.
+        const plate = new THREE.Mesh(look.geo(), new THREE.MeshBasicMaterial({ color: 0x9aa6b8, wireframe: true }));
         plate.scale.multiplyScalar(1.18); mesh.add(plate);
       } else if (A === "shielded") {
         const bub = new THREE.Mesh(new THREE.SphereGeometry(look.size * 1.15, 12, 10), new THREE.MeshBasicMaterial({ color: 0x4fd8ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));

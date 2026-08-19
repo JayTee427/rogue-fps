@@ -23,6 +23,7 @@ export const HINTS = {
   extract: "Banking keeps everything you've earned. Descending bets it for more.",
   pact: "Every bargain here is real: the curse is permanent, and so is the boon.",
   forgetting: "Cursed salvage takes as it gives. Check your pockets.",
+  doors: "A door’s tags are the next room’s contents. Clear it to collect the reward.",
 };
 
 export function hintFor(id) {

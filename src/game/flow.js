@@ -629,6 +629,7 @@ function resolveRoomEvent(choiceIndex) {
 }
 
 function openDoors() {
+  maybeHint("doors");
   // Roughly one room in three offers a choice instead of just a corridor.
   if (!G.eventSeen?.includes(`${G.run.floor}-${G.run.roomIndex}`) && G.run.roomIndex < 4) {
     const er = makeRng(G.run.seed).fork(`evroll${G.run.floor}-${G.run.roomIndex}`);
@@ -649,7 +650,7 @@ function openDoors() {
     const p = d.preview;
     // Tags say what they are. Three bare words in a row read as noise; a
     // labelled loot line, a labelled hazard and a warning read as a choice.
-    const bits = [`<span class="tag loot">LOOT: ${p.rewardType.toUpperCase()}</span>`];
+    const bits = [`<span class="tag loot">CLEAR FOR: ${p.rewardType.toUpperCase()}</span>`];
     if (p.hazardTag) bits.push(`<span class="tag hazard">HAZARD: ${p.hazardTag.replace("_", " ").toUpperCase()}</span>`);
     if (p.modifier) bits.push(`<span class="tag hazard">${String(p.modifier).replace("_", " ").toUpperCase()}</span>`);
     if (p.hasElite) bits.push('<span class="tag elite">ELITE GUARD</span>');
