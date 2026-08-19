@@ -1031,7 +1031,7 @@ function fire(want, dt) {
       const hitPos = origin.clone().addScaledVector(ray.dir, h.t);
       fx.hit(hitPos, ray.dir, res.crit);
       fx.number(res.damage, h.e.mesh.position, res.crit ? "crit" : "hit", h.e.mesh.uuid);
-      const hp3 = hit.e.mesh.position;
+      const hp3 = h.e.mesh.position;
       if (res.crit) { playAt(hp3, () => SFX.crit()); G.hitstop = Math.max(G.hitstop, 0.09); fx.trauma(0.22); } else playAt(hp3, () => SFX.hit());
       // Static Charge / Arc mod: every Nth hit chains lightning through nearby enemies
       if (s.chainEveryN > 0) {
@@ -1283,8 +1283,21 @@ function frame(now) {
     frameBody(now);
   } catch (err) {
     frameErrors++;
+    if (frameErrors <= 2) {
+      // Into the telemetry log, not just a console nobody has open. Without the
+      // stack this is a bug report that says only "it broke".
+      tlog("frame_error", {
+        msg: String(err?.message ?? err),
+        at: String(err?.stack ?? "").split("\n").slice(1, 5).join(" | "),
+        floor: G.run?.floor ?? null, room: (G.run?.roomIndex ?? -1) + 1,
+        alive: enemies?.list?.filter?.((e) => e.alive).length ?? null,
+        items: G.run?.held?.length ?? null,
+      });
+      tFlush();
+    }
     if (frameErrors <= 3) {
       console.error("[frame]", err);
+      G._firstErr ??= String(err?.message ?? err);   // survives to the final message
       const box = $("#crash");
       if (box) {
         box.textContent = `something broke: ${err?.message ?? err}`;
@@ -1298,7 +1311,10 @@ function frame(now) {
     if (frameErrors === 40) {
       try { input.releaseLock(); SFX.stopAmbient(); music?.stop(); } catch {}
       const box = $("#crash");
-      if (box) { box.textContent = "the run could not continue — returned to the menu"; box.classList.remove("hidden"); }
+      if (box) {
+        box.textContent = `the run could not continue — ${G._firstErr ?? "unknown error"}`;
+        box.classList.remove("hidden");
+      }
       menu();
     }
   }

@@ -166,7 +166,6 @@ export function buildArena(scene, rng, opts = {}) {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(halfW * 2, halfD * 2, 1, 1), flat(pal.floor));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
   g.add(floor);
-  const seamMat = new THREE.MeshBasicMaterial({ color: pal.floorSeam, transparent: true, opacity: 0.35 });
   const seamGeo = new THREE.BufferGeometry();
   const seamVerts = [];
   const tile = 4;
