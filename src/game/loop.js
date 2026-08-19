@@ -304,6 +304,56 @@ function frameBody(now) {
           pr: renderer.getPixelRatio(),
         };
 
+        // Name the thing, don't describe the symptom: hide each candidate,
+        // redraw, re-measure. The grade grain is SIGNED (+-0.006 around zero),
+        // so a black in-scene object rounds to exactly 0 - the earlier
+        // inference that only unwritten framebuffer reads zero was wrong, and
+        // it is why this bisection was removed once. It asks the scene
+        // directly on the machine that has the bug.
+        const suspects = [
+          ["weapon", weaponView?.group],
+          ["fxPoints", fx?.points],
+          ["enemies", enemies?.group],
+          ["hazards", hazards?.group],
+          ["dressing", G.dressing],
+          ["arena", G.arena?.group],
+        ];
+        let culprit = null, detail = null;
+        for (const [name, obj] of suspects) {
+          if (!obj || obj.visible === false) continue;
+          obj.visible = false;
+          render();
+          const cleared = Math.min(...scan()) >= 2;
+          obj.visible = true;
+          if (!cleared) continue;
+          culprit = name;
+          if (name === "enemies") {
+            // Which one? Hide each body in turn.
+            for (const e of enemies.list) {
+              if (!e.mesh?.visible) continue;
+              e.mesh.visible = false;
+              render();
+              const gone = Math.min(...scan()) >= 2;
+              e.mesh.visible = true;
+              if (gone) {
+                const d = Math.hypot(e.mesh.position.x - player.pos.x, e.mesh.position.z - player.pos.z);
+                const m = e.mesh.material;
+                detail = `${e.archetype}${e.affix ? "/" + e.affix : ""} alive=${e.alive} d=${d.toFixed(2)} ` +
+                  `scale=${e.mesh.scale.x.toFixed(2)} color=#${m?.color?.getHexString?.() ?? "?"} ` +
+                  `emissive=#${m?.emissive?.getHexString?.() ?? "?"} eI=${(m?.emissiveIntensity ?? 0).toFixed(2)} ` +
+                  `state=${e.mstate ?? e.atkState ?? "?"} pos=${e.mesh.position.x.toFixed(1)},${e.mesh.position.y.toFixed(1)},${e.mesh.position.z.toFixed(1)}`;
+                break;
+              }
+            }
+          } else if (name === "hazards") {
+            const kinds = [];
+            hazards.group.traverse((o) => { if (o.isMesh) kinds.push(`${o.geometry?.type}@${o.position.x.toFixed(0)},${o.position.z.toFixed(0)}`); });
+            detail = kinds.slice(0, 8).join(" ");
+          }
+          break;
+        }
+        render();                                  // leave the frame as the player saw it
+
         tlog("black_band", {
           buf: `${w}x${h}`, css: `${renderer.domElement.clientWidth}x${renderer.domElement.clientHeight}`,
           view: `${window.innerWidth}x${window.innerHeight}`, dpr: window.devicePixelRatio,
@@ -312,6 +362,14 @@ function frameBody(now) {
           prof: prof.join(","), overCentre: over || "(nothing over the canvas)",
           // The unwritten rectangle itself, in buffer pixels.
           zeroRect: x0 < 0 ? null : `x ${x0}..${x1} (${x1 - x0 + 1}px) y ${y0}..${y1} (${y1 - y0 + 1}px)`,
+          culprit: culprit ?? "(none of the suspects)", detail,
+          // A pure-black object rendered through the grade pass measures 5-7
+          // (verified with a planted box), so an exact-zero region means the
+          // composer's output never reached those pixels. These say whether
+          // the context died or the pass chain is not what we think it is.
+          ctxLost: renderer.getContext().isContextLost(),
+          drawCalls: renderer.info.render.calls,
+          passes: R.composer ? R.composer.passes.map((x) => `${x.constructor.name}${x.enabled ? "" : ":off"}`).join(",") : "(no composer)",
           ...state,
           // "attacked constantly but took no damage" says the frame was only
           // partly executing. Record enough to tell a stalled loop from a
