@@ -9,7 +9,7 @@ import { tickStatuses } from "core/combat.js";
 import { nextAttack } from "core/bosspatterns.js";
 import { gaitPose, windupPose, flinchPose, deathPose } from "core/anim.js";
 import { COLORS } from "./renderer.js";
-import { SFX } from "./audio.js";
+import { SFX, at as playAt } from "./audio.js";
 
 const flat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
 const EYE = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
@@ -235,7 +235,7 @@ export class EnemyManager {
           const jit = Math.sin(e.t * 9) * 0.6;
           this._move(e, (nx - nz * jit * 0.4) * spd, (nz + nx * jit * 0.4) * spd, dt, arena);
           m.rotation.y += dt * 6;                        // bob comes from the gait
-          e.voiceT = (e.voiceT ?? Math.random() * 1.5) - dt; if (e.voiceT <= 0 && dist < 14) { SFX.skitterChitter(); e.voiceT = 1.2 + Math.random() * 1.6; }
+          e.voiceT = (e.voiceT ?? Math.random() * 1.5) - dt; if (e.voiceT <= 0 && dist < 14) { playAt(m.position, () => SFX.skitterChitter()); e.voiceT = 1.2 + Math.random() * 1.6; }
           if (dist < 1.3 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 0.8; }
           break;
         }
@@ -243,7 +243,7 @@ export class EnemyManager {
           const want = dist > 14 ? 1 : dist < 9 ? -1 : 0;
           this._move(e, nx * want * spd, nz * want * spd, dt, arena);
           m.lookAt(pp.x, m.position.y, pp.z);
-          if (e.state === "seek" && e.cd <= 0) { e.state = "aim"; e.stateT = 0; SFX.sentinelCharge(); }
+          if (e.state === "seek" && e.cd <= 0) { e.state = "aim"; e.stateT = 0; playAt(m.position, () => SFX.sentinelCharge()); }
           if (e.state === "aim") {
             m.material.emissive.setHex(0xff2020); m.material.emissiveIntensity = 0.8 + Math.min(3.2, e.stateT * 4.5);   // the laser-sight tell
             if (e.stateT > 0.75) { e.state = "seek"; e.cd = 2.2 + Math.random(); this._restoreGlow(e); this._shoot(e, pp, 26, e.damage); }
@@ -251,7 +251,7 @@ export class EnemyManager {
           break;
         }
         case "brute": {                                              // roar, glow, then charge
-          if (e.state === "seek") { this._move(e, nx * spd, nz * spd, dt, arena); if (dist < 9 && e.cd <= 0) { e.state = "windup"; e.stateT = 0; SFX.bruteRoar(); } }
+          if (e.state === "seek") { this._move(e, nx * spd, nz * spd, dt, arena); if (dist < 9 && e.cd <= 0) { e.state = "windup"; e.stateT = 0; playAt(m.position, () => SFX.bruteRoar()); } }
           else if (e.state === "windup") { m.material.emissive.setHex(0xff5522); m.material.emissiveIntensity = 1 + e.stateT * 4; m.scale.setScalar((e.elite ? 1.35 : 1) * (1 + Math.sin(e.stateT * 20) * 0.12)); if (e.stateT > 0.7) { e.state = "charge"; e.stateT = 0; e.chargeDir = { x: nx, z: nz }; } }
           else if (e.state === "charge") { this._move(e, e.chargeDir.x * spd * 4.5, e.chargeDir.z * spd * 4.5, dt, arena); if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.5; } if (e.stateT > 0.6) { e.state = "seek"; e.cd = 2.5; this._restoreGlow(e); m.scale.setScalar(e.elite ? 1.25 : 1); } }
           m.lookAt(pp.x, m.position.y, pp.z);
@@ -275,7 +275,7 @@ export class EnemyManager {
             m.userData.shieldBot.position.y = e.gapY - half - 0.45;
             m.userData.shieldRim.position.y = e.gapY;
           }
-          e.voiceT = (e.voiceT ?? 0.5) - dt; if (e.voiceT <= 0 && dist < 12) { SFX.wardenHum(); e.voiceT = 2.2; }
+          e.voiceT = (e.voiceT ?? 0.5) - dt; if (e.voiceT <= 0 && dist < 12) { playAt(m.position, () => SFX.wardenHum()); e.voiceT = 2.2; }
           if (dist < 1.8 && e.cd <= 0) { events.push({ type: "hitPlayer", dmg: e.damage, src: e }); e.cd = 1.2; }
           break;
         }
@@ -286,7 +286,7 @@ export class EnemyManager {
           this._move(e, ox / od * spd, oz / od * spd, dt, arena);
           m.position.y += Math.sin(e.t * 3) * 0.35;      // adds to the gait, does not replace it
           m.rotation.y += dt * 2; m.rotation.x += dt * 1.3;
-          e.voiceT = (e.voiceT ?? Math.random()) - dt; if (e.voiceT <= 0 && dist < 16) { SFX.wispWhine(); e.voiceT = 1.8 + Math.random(); }
+          e.voiceT = (e.voiceT ?? Math.random()) - dt; if (e.voiceT <= 0 && dist < 16) { playAt(m.position, () => SFX.wispWhine()); e.voiceT = 1.8 + Math.random(); }
           if (e.cd <= 0) {
             // The design promises the Wisp DROPS MINES. Alternate: mine, shot, mine.
             if ((e.dropCount = (e.dropCount ?? 0) + 1) % 2 === 1) events.push({ type: "dropMine", x: m.position.x, z: m.position.z, damage: e.damage * 1.2 });
@@ -345,7 +345,7 @@ export class EnemyManager {
           e.atk = nextAttack(e.rng, e.bossId, e.hp / e.maxHp, e.atk?.shape ?? null);
           e.atkState = "windup"; e.atkT = 0; e._hitThis = false;
           events.push({ type: "bossTelegraph", text: e.atk.telegraph, secs: e.atk.windup });
-          SFX.sentinelCharge();
+          playAt(m.position, () => SFX.sentinelCharge());
         }
         break;
       case "windup":

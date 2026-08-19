@@ -130,6 +130,22 @@
     #biomeName{color:#7fd4ff;opacity:.75;letter-spacing:.1em}
     #evPrompt{text-align:center;color:var(--dim);max-width:520px;line-height:1.6;margin-bottom:6px}
     #event .cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;max-width:100%}
+    #crash{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;background:rgba(120,10,20,.92);color:#ffd9dd;padding:10px 18px;border:1px solid rgba(255,90,110,.5);border-radius:4px;font-size:12px;letter-spacing:.06em;max-width:80vw;text-align:center}
+    #crash.hidden{display:none}
+    #progHead{color:var(--accent);letter-spacing:.1em;font-size:13px}
+    #progTotals{display:grid;grid-template-columns:repeat(5,auto);gap:4px 18px;margin:10px 0 14px;font-size:12px}
+    #progTotals .k{color:var(--dim);letter-spacing:.08em}
+    #progTotals .v{color:#e8eef6;text-align:right}
+    #progCols{display:flex;gap:26px;flex-wrap:wrap;justify-content:center;max-height:56vh;overflow-y:auto}
+    #progCols h4{margin:0 0 8px;font-size:11px;letter-spacing:.16em;color:var(--dim)}
+    #progCols>div{min-width:260px;max-width:340px}
+    .prow{display:flex;flex-direction:column;padding:6px 9px;margin-bottom:5px;border-left:2px solid #2a3140;background:rgba(255,255,255,.02)}
+    .prow b{font-size:12px;letter-spacing:.05em}
+    .prow span{font-size:11px;color:var(--dim);line-height:1.4}
+    .prow.have{border-left-color:var(--accent)}
+    .prow.have b{color:#e8eef6}
+    .prow.locked{opacity:.45}
+    .prow.gold.have{border-left-color:var(--gold)}
     .card .price { font-size: 11px; color: var(--gold); letter-spacing: .1em; margin-top: 6px; }
     .card.sold { opacity: .35; text-decoration: line-through; pointer-events: none; }
     #pactText { text-align: center; color: var(--dim); font-style: italic; max-width: 440px; line-height: 1.5; margin-bottom: 4px; }
@@ -188,6 +204,7 @@
   </div>
 
   <!-- boot -->
+  <div id="crash" class="hidden"></div>
   <div id="boot" class="layer screen"><div class="spin"></div><div>CALIBRATING</div></div>
 
   <!-- title / menu -->
@@ -197,7 +214,7 @@
     <p>You are a salvage drone dropped into a derelict station whose rooms rearrange between visits. Fight through it with a gun that changes every time you find something. Extract, or go deeper.</p>
     <div class="row">
       <button class="big" id="btnRun">New Run</button>
-      <button class="big ghost" id="btnDaily">Daily Seed</button>
+      <button class="big ghost" id="btnDaily">Daily Seed</button><button class="big ghost" id="btnProgress">Progress</button>
     </div>
     <div class="row">
       <input class="seed" id="seedInput" placeholder="SEED (optional)" maxlength="10" />
@@ -219,6 +236,18 @@
     <div class="sub">weapons cache · swap or keep</div>
     <div class="cards" id="weaponCards"></div>
     <div class="row"><button class="big" id="btnSwap">Take It</button><button class="big ghost" id="btnKeep">Keep Mine</button></div>
+  </div>
+
+  <!-- progress -->
+  <div id="progress" class="layer screen hidden">
+    <div class="sub">salvage record</div>
+    <div id="progHead"></div>
+    <div id="progTotals"></div>
+    <div id="progCols">
+      <div><h4>UNLOCKS</h4><div id="progUnlocks"></div></div>
+      <div><h4>ACHIEVEMENTS</h4><div id="progAch"></div></div>
+    </div>
+    <div class="row"><button class="big" id="btnProgClose">Back</button></div>
   </div>
 
   <!-- room event -->

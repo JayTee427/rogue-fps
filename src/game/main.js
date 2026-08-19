@@ -154,6 +154,47 @@ function roomChallengeEnd() {
   return checkChallenge(ch, G.roomStats) ? ch : null;
 }
 
+function renderProgress() {
+  const p = achievementProgress(achState);
+  const ps = profileSummary(profile);
+  $("#progHead").textContent = `${ps.unlockedCount}/${ps.totalCount} unlocked · ${p.earned}/${p.total} achievements`;
+
+  const t = profile.totals ?? {};
+  $("#progTotals").innerHTML = [
+    ["runs", t.runs ?? 0], ["kills", t.kills ?? 0], ["best score", (t.bestScore ?? 0).toLocaleString()],
+    ["deepest floor", t.deepestFloor ?? 0], ["extractions", t.extractions ?? 0],
+  ].map(([k, v]) => `<span class="k">${k}</span><span class="v">${v}</span>`).join("");
+
+  const unl = $("#progUnlocks"); unl.innerHTML = "";
+  for (const id of Object.keys(UNLOCKS)) {
+    const u = UNLOCKS[id], have = (profile.unlocked ?? []).includes(id);
+    const el = document.createElement("div");
+    el.className = `prow ${have ? "have" : "locked"}`;
+    el.innerHTML = `<b>${have ? u.name : "???"}</b><span>${have ? u.desc : describeRequirement(u)}</span>`;
+    unl.appendChild(el);
+  }
+
+  const ach = $("#progAch"); ach.innerHTML = "";
+  for (const id of Object.keys(ACHIEVEMENTS)) {
+    const a = ACHIEVEMENTS[id], have = (achState.earned ?? []).includes(id);
+    const el = document.createElement("div");
+    el.className = `prow ${have ? "have" : "locked"} ${a.tier}`;
+    el.innerHTML = `<b>${a.name}</b><span>${a.desc}</span>`;
+    ach.appendChild(el);
+  }
+}
+
+/** What a locked unlock still wants, in words rather than a raw object. */
+function describeRequirement(u) {
+  const t = profile.totals ?? {};
+  const parts = Object.entries(u.requires ?? {});
+  const met = parts.every(([k, need]) => (t[k] ?? 0) >= need);
+  // Unlocks are granted when a run ENDS, so a satisfied requirement can sit here
+  // still locked. Saying "40/40" makes that look like a bug; say what happens next.
+  if (met && parts.length) return "earned — unlocks when your next run ends";
+  return parts.map(([k, need]) => `${k} ${Math.min(t[k] ?? 0, need)}/${need}`).join(" · ") || "keep playing";
+}
+
 function toast(text, warn = false, ms = 1400) {
   const t = $("#toast"); t.textContent = text; t.className = "on" + (warn ? " warn" : "");
   clearTimeout(toast._t); toast._t = setTimeout(() => (t.className = ""), ms);
@@ -166,6 +207,7 @@ function beginRun(seed, cursesEnabled) {
   G.seedText = formatSeed(seed);
   G.hp = G.run.maxHp; G.shield = 0;
   G.runStartedAt = performance.now();
+  frameErrors = 0;
   G.runDamageTaken = 0; G.runHeadshots = 0;
   SFX.startAmbient();
   music = new MusicPlayer(makeRng(seed).fork("music"));
@@ -938,8 +980,7 @@ function explode(pos, radius, dmg) {
 }
 
 // ------------------------------------------------------------------ loop --
-function frame(now) {
-  requestAnimationFrame(frame);
+function frameBody(now) {
   let dt = Math.min(0.05, (now - G.lastFrame) / 1000); G.lastFrame = now;
   if (G.hitstop > 0) { G.hitstop -= dt; dt *= 0.15; }
   if (G.btT > 0) { G.btT -= dt; if (G.btT <= 0) G.timeScale = 1; }
@@ -1045,6 +1086,37 @@ function frame(now) {
   render();
 }
 
+// --- error boundary -------------------------------------------------------
+// Keep the loop alive through a throw, tell the player something went wrong
+// rather than freezing, and stop shouting after the first few.
+let frameErrors = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  try {
+    frameBody(now);
+  } catch (err) {
+    frameErrors++;
+    if (frameErrors <= 3) {
+      console.error("[frame]", err);
+      const box = $("#crash");
+      if (box) {
+        box.textContent = `something broke: ${err?.message ?? err}`;
+        box.classList.remove("hidden");
+        clearTimeout(frame._t);
+        frame._t = setTimeout(() => box.classList.add("hidden"), 6000);
+      }
+    }
+    // A storm of identical errors means the loop cannot recover on its own.
+    // Drop back to the menu rather than burning the CPU on a broken frame.
+    if (frameErrors === 40) {
+      try { input.releaseLock(); SFX.stopAmbient(); music?.stop(); } catch {}
+      const box = $("#crash");
+      if (box) { box.textContent = "the run could not continue — returned to the menu"; box.classList.remove("hidden"); }
+      menu();
+    }
+  }
+}
+
 // -------------------------------------------------------------- menu wiring --
 function menu() {
   input.releaseLock();
@@ -1058,6 +1130,8 @@ $("#btnRun").addEventListener("click", () => {
   const seed = txt ? (parseSeed(txt) ?? (Math.random() * 2 ** 32) >>> 0) : (Math.random() * 2 ** 32) >>> 0;
   beginRun(seed, $("#chkCurses").checked);
 });
+$("#btnProgress").addEventListener("click", () => { renderProgress(); show("#progress"); });
+$("#btnProgClose").addEventListener("click", () => menu());
 $("#btnShopLeave").addEventListener("click", leaveShop);
 $("#btnShopReroll").addEventListener("click", () => {
   const res = rerollStock(makeRng(G.run.seed).fork(`shopre${G.run.gold}`),
