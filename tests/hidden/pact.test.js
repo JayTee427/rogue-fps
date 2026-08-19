@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { rng } from "core/rng.js";
-import { ITEM_BY_ID, ITEMS } from "core/items.js";
+import { ITEMS } from "core/items.js";
 import { BOONS, rollPact, acceptPact, refusePact } from "core/pact.js";
 
 const R = (s = 6) => rng(s);

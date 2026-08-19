@@ -82,13 +82,13 @@ export function rollChallenge(rng, floor, exclude = []) {
 }
 
 export function checkChallenge(challenge, stats) {
-  try { return !!challenge.test(stats || {}); } catch (e) { return false; }
+  try { return !!challenge.test(stats || {}); } catch { return false; }
 }
 
 export function challengeProgress(challenge, stats) {
   const s = stats || {};
   let frac = 0;
-  try { frac = challenge.progress(s); } catch (e) { frac = 0; }
+  try { frac = challenge.progress(s); } catch { frac = 0; }
   return { frac: c01(frac), text: progressText(challenge, s) };
 }
 

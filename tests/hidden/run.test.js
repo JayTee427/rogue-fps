@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newRun, startFloor, enterRoom, clearRoom, takeReward, chooseDoor, beatBoss, extract, die, canExtract } from "core/run.js";
-import { ITEM_BY_ID } from "core/items.js";
+import { newRun, startFloor, clearRoom, takeReward, chooseDoor, beatBoss, extract, die, canExtract } from "core/run.js";
 
 // Contract: every function returns a NEW run object; the input is never mutated.
 // Illegal transitions throw. `run.phase` is one of:

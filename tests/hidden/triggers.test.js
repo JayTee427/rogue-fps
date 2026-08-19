@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ITEMS, ITEM_BY_ID } from "core/items.js";
+import { ITEMS } from "core/items.js";
 import { onKill, onShoot, onEnemyHit, onHitTaken, onDeath, HANDLED } from "core/triggers.js";
 
 const ctx = (o = {}) => ({ hp: 100, maxHp: 100, shotIndex: 0, magSize: 10, damage: 20, isHeadshot: false, isCrit: false, floor: 2, ...o });

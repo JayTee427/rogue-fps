@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ITEMS, ITEM_BY_ID } from "core/items.js";
+import { ITEMS } from "core/items.js";
 import { passiveMods, HANDLED } from "core/effects.js";
 
-const ctx = (o = {}) => ({ hp: 100, maxHp: 100, shotIndex: 0, magSize: 10, damage: 20, isHeadshot: false, isCrit: false, floor: 2, ...o });
 const allEffectKeys = new Set(ITEMS.flatMap((i) => Object.keys(i.effects ?? {})));
 
 describe("HANDLED", () => {

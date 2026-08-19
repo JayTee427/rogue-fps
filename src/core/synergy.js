@@ -1,4 +1,3 @@
-import { ITEMS, ITEM_BY_ID } from "core/items.js";
 
 export const SYNERGIES = {
   fire_storm: {

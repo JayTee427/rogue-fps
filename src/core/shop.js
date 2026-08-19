@@ -1,4 +1,4 @@
-import { ITEMS, ITEM_BY_ID } from "core/items.js";
+import { ITEMS } from "core/items.js";
 
 export const PRICES = {
   common: 25,

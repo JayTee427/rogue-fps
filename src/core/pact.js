@@ -1,4 +1,4 @@
-import { ITEMS, ITEM_BY_ID } from "core/items.js";
+import { ITEMS } from "core/items.js";
 
 const CURSED = ITEMS.filter((i) => i.rarity === "cursed");
 

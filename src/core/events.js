@@ -110,8 +110,6 @@ export function resolveEvent(rng, eventId, choiceIndex, run) {
     return base;
   }
 
-  const state = { ...run };
-  const choice = event.choices[choiceIndex];
 
   switch (eventId) {
     case "salvage":

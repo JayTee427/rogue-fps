@@ -61,8 +61,6 @@ export function layoutDressing(rng, arena, floor = 1) {
   const counts = {};
   const kinds = Object.values(PROP_KINDS);
   const floorKinds = kinds.filter(k => k.mount === "floor");
-  const wallKinds = kinds.filter(k => k.mount === "wall");
-  const ceilKinds = kinds.filter(k => k.mount === "ceiling");
 
   const target = Math.max(6, Math.min(80, 10 + floor * 2));
   const attempts = target * 3;

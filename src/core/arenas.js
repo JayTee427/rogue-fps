@@ -71,7 +71,6 @@ export function biomePalette(biomeId) {
 }
 
 export function biomeLayout(rng, biomeId, floor) {
-  const f = Math.max(1, Math.floor(floor) || 1);
   const base = BIOMES[biomeId] || BIOMES.cargo;
 
   let halfW, halfD, blockCount, ceiling;

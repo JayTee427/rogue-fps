@@ -115,7 +115,7 @@ describe("stepHazards", () => {
     for (let i = 0; i < 400; i++) { r = stepHazards(r.hazards, 0.05, near, rng(i)); shots += r.events.filter(e => e.type === "shoot").length; }
     expect(shots).toBeGreaterThan(3);
     expect(shots).toBeLessThan(40);                    // it has a cooldown, it's not a hose
-    const s = r.events.find(e => e.type === "shoot") || null;
+    r.events.find(e => e.type === "shoot");
     // a shoot event carries origin and a unit direction toward the player
     let any = null;
     for (let i = 0; i < 100 && !any; i++) { r = stepHazards(r.hazards, 0.05, near, rng(i)); any = r.events.find(e => e.type === "shoot"); }

@@ -1,4 +1,3 @@
-import { ITEMS } from "core/items.js";
 
 export const ROOM_MODIFIERS = {
   low_gravity: { name: "Low Gravity", desc: "Jump higher, move slower" },

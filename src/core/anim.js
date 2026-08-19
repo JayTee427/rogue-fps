@@ -45,7 +45,6 @@ export function gaitPose(archetype, t, speed) {
 
   // Idle breathing even at zero speed.
   const idleAmp = 0.02;
-  const idleFreq = 1.7;
 
   // Speed-driven amplitude (clearly larger at high speed).
   const moveAmp = bob * 0.5;

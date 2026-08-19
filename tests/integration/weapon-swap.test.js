@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newRun, startFloor, clearRoom, takeReward, chooseDoor, swapWeapon } from "core/run.js";
+import { newRun, startFloor, clearRoom, swapWeapon } from "core/run.js";
 import { rollWeapon, ARCHETYPES } from "core/weapons.js";
 import { rng } from "core/rng.js";
 

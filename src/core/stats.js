@@ -1,5 +1,4 @@
 // src/core/stats.js
-import { ITEMS } from "core/items.js";
 
 export const BASE_STATS = {
   // NOTE: this table was once 113 entries long, the tail of it an anatomical
