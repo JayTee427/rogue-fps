@@ -34,7 +34,7 @@ import { WeaponView } from "./weaponView.js";
 import { EnemyManager } from "./enemies.js";
 import { initAudio, resumeAudio, SFX, duckMusic, setListener, at as playAt, footstep } from "./audio.js";
 import { MusicPlayer } from "./musicPlayer.js";
-import { log as tlog, startRun as tStartRun, flushNow as tFlush } from "./telemetry.js";
+import { log as tlog, startRun as tStartRun, flushNow as tFlush, telemetryOn } from "./telemetry.js";
 import { FX } from "./fx.js";
 import { HazardView } from "./hazardView.js";
 import { TIERS } from "core/quality.js";
@@ -1174,14 +1174,18 @@ function frameBody(now) {
   dt *= G.timeScale;
 
   const { s, look } = input.poll();
-  if (G.run && $("#hud") && !$("#hud").classList.contains("hidden")) {
-    // Losing the pointer is silent and, until now, unexplained. Say it on
-    // screen and record it, so a run that goes wrong reports which it was.
-    if (input.lockLost !== G._lockLost) {
-      G._lockLost = input.lockLost;
-      $("#aimlost").classList.toggle("hidden", !input.lockLost);
-      tlog("pointer_lock", { lost: input.lockLost, touch: input.isTouch });
-    }
+  const hudUp = !!($("#hud") && !$("#hud").classList.contains("hidden"));
+  // Losing the pointer is silent and, until now, unexplained: say it on screen
+  // and record it. Evaluated outside the HUD branch below, because when a
+  // screen opens the branch stops running and the prompt used to stay stuck on
+  // - which is why CLICK TO AIM was sitting on top of the death screen.
+  const wantAim = !!(G.run && hudUp && input.lockLost);
+  if (wantAim !== G._lockLost) {
+    G._lockLost = wantAim;
+    $("#aimlost").classList.toggle("hidden", !wantAim);
+    tlog("pointer_lock", { lost: wantAim, touch: input.isTouch });
+  }
+  if (G.run && hudUp) {
     if (input.locked || input.isTouch) player.look(look.dx, look.dy, input.mouseSens);
     player.update(dt, s);
     if (player.dashed) { SFX.dash(); fx.dash(new THREE.Vector3(player.pos.x, 0.6, player.pos.z)); } if (player.jumped) SFX.jump();
@@ -1304,12 +1308,26 @@ function frameBody(now) {
         prof.push(Math.round(s / Math.max(1, n)));
       }
       // A band under 4/255 is not a dark room, it is nothing being drawn there.
-      if (Math.min(...prof) < 4) {
+      // Report a few times and then stop: enough to see whether it moves with
+      // the view, never enough to become noise.
+      if (Math.min(...prof) < 4 && (G.bandN = (G.bandN ?? 0) + 1) <= 6) {
+        // The question this exists to settle: is the black inside the WebGL
+        // buffer, or is it something in the DOM sitting on top of the canvas?
+        // The scanline answers the first, elementFromPoint answers the second.
+        const cx = Math.round(window.innerWidth / 2), cy = Math.round(window.innerHeight / 2);
+        const over = document.elementsFromPoint(cx, cy)
+          .filter((e) => e.tagName !== "CANVAS" && e.tagName !== "HTML" && e.tagName !== "BODY")
+          .slice(0, 3)
+          .map((e) => `${e.tagName}#${e.id || "-"}.${(e.className || "").toString().trim().split(/\s+/)[0] || "-"}`)
+          .join(" > ");
         tlog("black_band", {
           buf: `${w}x${h}`, css: `${renderer.domElement.clientWidth}x${renderer.domElement.clientHeight}`,
           view: `${window.innerWidth}x${window.innerHeight}`, dpr: window.devicePixelRatio,
-          tier: G.qTier, yaw: Math.round((player.yaw ?? 0) * 57.3), prof: prof.join(","),
+          tier: G.qTier, yaw: Math.round((player.yaw ?? 0) * 57.3),
+          pitch: Math.round((player.pitch ?? 0) * 57.3),
+          prof: prof.join(","), overCentre: over || "(nothing over the canvas)",
         });
+        tFlush();
       }
     } catch { /* readPixels can fail on a lost context; never break the frame for a probe */ }
   }
@@ -1318,8 +1336,9 @@ function frameBody(now) {
 // --- error boundary -------------------------------------------------------
 // Keep the loop alive through a throw, tell the player something went wrong
 // rather than freezing, and stop shouting after the first few.
-// Only under ?dev - the probe reads back a scanline and that is not free.
-const DEV_PROBE = new URLSearchParams(location.search).has("dev");
+// Runs wherever telemetry runs. Gating this behind ?dev meant the one
+// playtest that could have identified the black region produced nothing.
+const DEV_PROBE = telemetryOn;
 let frameErrors = 0;
 function frame(now) {
   requestAnimationFrame(frame);
@@ -1445,6 +1464,7 @@ if (new URLSearchParams(location.search).has("dev")) {
   window.__hs = {
     G, enemies, player, fx, hazards, renderer, scene, camera, THREE,
     scaleEnemy, rollWeapon,
+    resize: () => R.resize(), ensureSize: () => R.ensureSize(),
     get music() { return music; },
     // Drive the loop by hand. requestAnimationFrame is paused whenever the tab
     // is not compositing (headless verification, background pane), so without

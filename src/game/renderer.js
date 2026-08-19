@@ -147,10 +147,15 @@ void main() {
    *  rather than assumed. Returns what was wrong, or null if nothing was.  */
   const ensureSize = () => {
     const c = renderer.domElement, pr = renderer.getPixelRatio();
-    const wantW = Math.round(window.innerWidth * pr), wantH = Math.round(window.innerHeight * pr);
+    // Math.floor, not Math.round: this has to agree with what Three actually
+    // does to the canvas, or the two disagree forever. At 2157 x 0.8 that is
+    // 1725 against 1726 - a difference of one pixel that had this calling
+    // onResize every second for an entire run.
+    const wantW = Math.floor(window.innerWidth * pr), wantH = Math.floor(window.innerHeight * pr);
+    const off = (a, b) => Math.abs(a - b) > 1;            // a pixel of slack
     const rt = composer?.renderTarget1;
-    const stale = rt && (rt.width !== wantW || rt.height !== wantH);
-    if (c.width === wantW && c.height === wantH && !stale) return null;
+    const stale = rt && (off(rt.width, wantW) || off(rt.height, wantH));
+    if (!off(c.width, wantW) && !off(c.height, wantH) && !stale) return null;
     const was = {
       canvas: `${c.width}x${c.height}`,
       target: rt ? `${rt.width}x${rt.height}` : null,
