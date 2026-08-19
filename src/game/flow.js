@@ -17,7 +17,8 @@ import { HAZARD_DEFS } from "core/hazards.js";
 import { scoreRun } from "core/score.js";
 import { dailySeed, formatSeed, parseSeed } from "core/daily.js";
 import { ITEM_BY_ID, ITEMS } from "core/items.js";
-import { flavourFor } from "core/codex.js";
+import { flavourFor, BIOME_LORE, BOSS_LORE, deathLineFor } from "core/codex.js";
+import { hintFor } from "core/hints.js";
 import { scaleEnemy } from "core/enemies.js";
 import { rollWeapon, ARCHETYPES, WEAPON_MODS } from "core/weapons.js";
 import { planEncounter, updateSkill } from "core/director.js";
@@ -72,6 +73,25 @@ function roomChallengeEnd() {
 
 
 
+// ---------------------------------------------------------- first-time hints --
+// One line, the first time a thing appears, ever, on this browser. Queued so
+// two new enemies in one room speak in turn instead of over each other.
+const seenHints = new Set(JSON.parse(localStorage.getItem("hs_hints") ?? "[]"));
+let hintDelay = 0;
+
+export function maybeHint(ids) {
+  for (const id of Array.isArray(ids) ? ids : [ids]) {
+    if (seenHints.has(id)) continue;
+    const line = hintFor(id);
+    if (!line) continue;
+    seenHints.add(id);
+    localStorage.setItem("hs_hints", JSON.stringify([...seenHints]));
+    setTimeout(() => toast(line, false, 3600), 900 + hintDelay);
+    hintDelay += 3800;
+    setTimeout(() => { hintDelay = Math.max(0, hintDelay - 3800); }, 4000);
+  }
+}
+
 // -------------------------------------------------------------- run flow --
 function beginRun(seed, cursesEnabled) {
   initAudio(); resumeAudio();
@@ -113,6 +133,7 @@ function onFloorStart(first = false) {
   const s = scoreRun(r).total;
   $("#fsText").textContent = `Banking now scores ${s.toLocaleString()}. Descending repairs ${Math.round(r.maxHp * FLOOR_REPAIR)} HP and multiplies everything — and everything hits harder.`;
   input.releaseLock();
+  maybeHint("extract");
   show("#floorStart");
 }
 
@@ -167,6 +188,7 @@ function enterRoom() {
   // first (firstWave 0 places nobody), then plan over the actual roster — the
   // plan cannot be made before the roster exists.
   const { deferred } = enemies.spawnRoom(seedRng.fork("enemies"), r.floor, r.roomIndex, G.arena, G.mods, room.eliteCount, 0);
+  maybeHint([...enemies.list.map((e) => e.archetype), ...deferred.map((d) => d.data.archetype)]);
   const plan = planEncounter(seedRng.fork("director"), {
     floor: r.floor, roomIndex: r.roomIndex, skill: G.skill,
     roster: deferred.map((_, i) => String(i)),
@@ -206,6 +228,8 @@ function enterRoom() {
   scene.fog.density = G.mods.darkness ? 0.042 : biomeFog(biomePalette(G.biome ?? "").fogDensity);
   $("#floorNum").textContent = `FLOOR ${r.floor}`;
   $("#biomeName").textContent = (BIOMES[G.biome]?.name ?? "").toUpperCase();
+  // The place introduces itself once per floor, after the HUD settles.
+  if (r.roomIndex === 0 && BIOME_LORE[G.biome]) setTimeout(() => toast(BIOME_LORE[G.biome], false, 4200), 1400);
   $("#roomNum").textContent = r.roomIndex >= 4 ? "ROOM 5/5 · BOSS NEXT" : `ROOM ${r.roomIndex + 1}/5`;
   $("#modName").textContent = room.modifier ? ROOM_MODIFIERS[room.modifier].name.toUpperCase() : (room.hazardTag ? room.hazardTag.replace("_", " ").toUpperCase() : "");
   if (room.modifier) toast(ROOM_MODIFIERS[room.modifier].name + " — " + ROOM_MODIFIERS[room.modifier].desc, true, 2200);
@@ -252,6 +276,7 @@ function enterBoss() {
   $("#bossName").textContent = `${b.name.toUpperCase()} · ${b.affix.toUpperCase()}`; $("#bossFill").style.width = "100%"; $("#bossbar").classList.remove("hidden");
   audio.music?.setBoss(true);
   toast(`${b.name} — ${b.affix}`, true, 2600); SFX.bossRoar();
+  if (BOSS_LORE[b.id]) setTimeout(() => toast(BOSS_LORE[b.id], false, 4200), 2800);
   weaponView.equip(r.weapon); renderItems(); show("#hud"); input.requestLock();
 }
 
@@ -516,6 +541,7 @@ function leaveShop() {
 
 // ---------------------------------------------------------- curse altar --
 function openPact() {
+  maybeHint("pact");
   const r = G.run;
   const p = rollPact(makeRng(r.seed).fork(`pact${r.floor}-${r.roomIndex}`),
     { floor: r.floor, held: r.held, maxHp: r.maxHp });
@@ -689,6 +715,7 @@ function endRun(kind) {
     box.value = getPilot() ?? "";   // a signed-in pilot does not retype their name
     setTimeout(() => box.focus(), 120);
   }
+  $("#repDeath").textContent = kind === "dead" ? deathLineFor(G.lastDamageWhy) : "";
   show("#report");
   if (kind === "dead") SFX.death();
   tlog("run_end", {

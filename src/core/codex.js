@@ -85,3 +85,50 @@ export const FLAVOUR = {
 export function flavourFor(id) {
   return (id && FLAVOUR[id]) || "";
 }
+
+// ---------------------------------------------------------------------------
+// Voice for the places, the bosses, and the ways a run ends. Same rules as the
+// item lines: one sentence, cold, station-gothic, no exclamation marks.
+
+export const BIOME_LORE = {
+  cargo: "The manifest promises supplies for forty thousand souls. The manifest lies.",
+  reactor: "The coolant still cycles. Nobody ever told it to stop.",
+  quarters: "Every bunk is made. Whoever made them was very thorough, and very alone.",
+  hull: "One sheet of plating between you and everything the station fell out of.",
+  hydro: "The crops kept growing after the growers stopped. They are not crops anymore.",
+};
+
+export const BOSS_LORE = {
+  custodian: "It kept the station spotless for nine years after the last crew died. You are the mess.",
+  chorus: "Fifty distress calls, one voice. It has been answering itself for a long time.",
+  landlord: "It collects what the station is owed. The station is owed everything.",
+};
+
+// The line the report screen shows for how you died, keyed by the damage-why
+// string. Melee deaths resolve by archetype; everything else by source.
+export const DEATH_LINES = {
+  skitter: "Something small got close, and then closer.",
+  sentinel: "You watched it charge, and you were still there when it finished.",
+  brute: "It only needed to land one.",
+  popper: "It only wanted a hug.",
+  warden: "You kept shooting the shield. The shield won.",
+  wisp: "The mine was patient. You weren't.",
+  lurker: "It circled. You didn't.",
+  sniper: "You saw the line. The line saw you first.",
+  shaman: "Its congregation outlasted you.",
+  swarm: "One bite at a time, on schedule.",
+  projectile: "Somewhere out there, a very patient gun.",
+  beam: "The sweep only goes one way. You went the other.",
+  mine: "Somebody left it there for exactly this reason.",
+  popperBlast: "Chain reactions rarely consult you first.",
+  boss: "It was doing its job. You were the job.",
+  selfDamage: "Burn bright, burn fast. You read the label.",
+  hazard: "The station kills without ever noticing you.",
+};
+
+/** A line for a damage-why string like "melee:skitter" or "beam". */
+export function deathLineFor(why) {
+  if (!why) return "The station keeps its secrets.";
+  const key = String(why).startsWith("melee:") ? String(why).slice(6) : String(why);
+  return DEATH_LINES[key] ?? "The station keeps its secrets.";
+}

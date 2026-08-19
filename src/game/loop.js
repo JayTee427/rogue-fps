@@ -5,7 +5,7 @@
 import * as THREE from "three";
 import { $, toast, G, R, renderer, scene, camera, render, player, input, weaponView, enemies, fx, hazards, audio, isMobile } from "./context.js";
 import { fire, onKill, onBossAttack, damagePlayer, heal, clearBossTell, clearBeamSweep, explode, makeBeamMesh } from "./combat.js";
-import { pumpWaves, wavesPending, onRoomCleared, menu, openDraft, onBossDown, enterBoss, recomputeStats } from "./flow.js";
+import { pumpWaves, wavesPending, onRoomCleared, menu, openDraft, onBossDown, enterBoss, recomputeStats, maybeHint } from "./flow.js";
 import { angleCrossed } from "core/bosspatterns.js";
 import { SFX, setListener, footstep } from "./audio.js";
 import { log as tlog, flushNow as tFlush, telemetryOn } from "./telemetry.js";
@@ -94,6 +94,7 @@ function frameBody(now) {
           // screen edge is read by nobody who is currently being shot at.
           clearBossTell();
           if (ev.shape === "sweep_beam") {
+            maybeHint("sweep_beam");
             const sw = ev.sweep ?? { range: 22, height: 1.15 };
             const ghost = makeBeamMesh(sw.range, 0.16);
             ghost.position.set(ev.pos.x, sw.height, ev.pos.z);
