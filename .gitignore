@@ -10,3 +10,4 @@ delegation/.scratch/
 # Laguna delegation harness and specs - kept local
 delegation/
 playtest.log
+.scratch/
