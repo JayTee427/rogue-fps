@@ -6,6 +6,7 @@ import { rng as makeRng } from "core/rng.js";
 import { newRun, startFloor, clearRoom, takeReward, chooseDoor, beatBoss, extract, die, canExtract, swapWeapon } from "core/run.js";
 import { resolveHit } from "core/combat.js";
 import { ROOM_MODIFIERS, BOSSES } from "core/floor.js";
+import { HAZARD_DEFS } from "core/hazards.js";
 import { scoreRun } from "core/score.js";
 import { dailySeed, formatSeed, parseSeed } from "core/daily.js";
 import { pickQualityTier } from "core/quality.js";
@@ -252,6 +253,7 @@ function enterRoom() {
   });
   player.arena = G.arena;
   player.reset(0, G.arena.halfD - 4);
+  G.arena.spawnSafe = { x: 0, z: G.arena.halfD - 4 };   // enemies keep clear of this
   player.yaw = 0; player.pitch = 0;
   applyStats();
   enemies.clear();
@@ -282,6 +284,9 @@ function enterRoom() {
   G.dressing?.removeFromParent();
   G.dressing = buildDressing(scene, layoutDressing(seedRng.fork("dressing"), G.arena, r.floor), PROP_KINDS);
   G.roomActive = true; G.roomCleared = false; G.bossMode = false; G.killsThisRoom = 0;
+  // A short grace on arrival. Being shot before you have looked around is not
+  // difficulty, it is a bad first impression.
+  G.invuln = Math.max(G.invuln, r.floor === 1 && r.roomIndex === 0 ? 2.2 : 1.2);
   $("#bossbar").classList.add("hidden");
   music?.setBoss(false);
   G.roomTimer = G.mods.timePressure ? 60 : 0;
@@ -289,9 +294,13 @@ function enterRoom() {
   scene.fog.density = G.mods.darkness ? 0.11 : biomeFog(biomePalette(G.biome ?? "").fogDensity);
   $("#floorNum").textContent = `FLOOR ${r.floor}`;
   $("#biomeName").textContent = (BIOMES[G.biome]?.name ?? "").toUpperCase();
-  $("#roomNum").textContent = `ROOM ${r.roomIndex + 1}/5`;
+  $("#roomNum").textContent = r.roomIndex >= 4 ? "ROOM 5/5 · BOSS NEXT" : `ROOM ${r.roomIndex + 1}/5`;
   $("#modName").textContent = room.modifier ? ROOM_MODIFIERS[room.modifier].name.toUpperCase() : (room.hazardTag ? room.hazardTag.replace("_", " ").toUpperCase() : "");
   if (room.modifier) toast(ROOM_MODIFIERS[room.modifier].name + " — " + ROOM_MODIFIERS[room.modifier].desc, true, 2200);
+  else if (room.hazardTag && HAZARD_DEFS[room.hazardTag]) {
+    const hz = HAZARD_DEFS[room.hazardTag];
+    toast(`${hz.name.toUpperCase()} — ${hz.desc}`, true, 2800);
+  }
   weaponView.equip(r.weapon);
   renderItems();
   addGold(0);                    // refresh the readout
@@ -881,6 +890,10 @@ function fire(want, dt) {
 }
 
 function onKill(e, res) {
+  // Several paths can reach a single death: the shot that landed it, the kill
+  // event enemies.js raises, an explosion catching the corpse. Count once.
+  if (e._killCounted) return;
+  e._killCounted = true;
   const s = G.run.stats;
   G.killsThisRoom++;
   if (G.roomStats) G.roomStats.kills++;
@@ -1008,7 +1021,7 @@ function frameBody(now) {
         else if (ev.type === "bossAttack") { onBossAttack(ev); }
         else if (ev.type === "dropMine") { hazards.addMine(ev.x, ev.z, ev.damage); SFX.ui(); }
         else if (ev.type === "popperBoom") { const d = player.pos.distanceTo(ev.pos); if (d < ev.r) damagePlayer(ev.dmg * (1 - d / ev.r), "popper"); explode(ev.pos, ev.r, ev.dmg * 0.5); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive && !wavesPending()) onRoomCleared(); }
-        else if (ev.type === "kill") { if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive && !wavesPending()) onRoomCleared(); }
+        else if (ev.type === "kill") { onKill(ev.e, { damage: 0 }); if (!G.bossMode && enemies.aliveCount === 0 && G.roomActive && !wavesPending()) onRoomCleared(); }
       }
       if (G.mods.timePressure && G.roomActive) { G.roomTimer -= dt; if (G.roomTimer <= 0) { damagePlayer(9999, "timer"); } }
       // hazards (turrets, mines, lava, acid, collapsing) — logic in core, drawn by hazardView

@@ -74,7 +74,11 @@ export class EnemyManager {
     // correctly sized roster.
     const base = rollRoster(rng, floor, roomIndex, mods);
     const pool = foeRoster(rng, floor, roomIndex).filter((id) => EXTRA_FOES[id]);
-    const roster = base.map((id) => (pool.length && rng.chance(0.3) ? rng.pick(pool) : id));
+    let roster = base.map((id) => (pool.length && rng.chance(0.3) ? rng.pick(pool) : id));
+    // The very first room is a first impression. A Popper rushes you and
+    // detonates, which is a fine lesson on floor 2 and a bad one before the
+    // player has learned to move. Swap them out of the opening room only.
+    if (floor === 1 && roomIndex === 0) roster = roster.map((id) => (id === "popper" ? "skitter" : id));
     const swarmHp = mods.swarm ? 0.5 : 1;
     const deferred = [];
     roster.forEach((id, i) => {
@@ -83,10 +87,18 @@ export class EnemyManager {
       const data = EXTRA_FOES[id] ? scaleFoe(id, floor, roomIndex) : scaleEnemy(id, floor, roomIndex, affix);
       if (EXTRA_FOES[id] && affix) data.affix = affix;
       data.hp = Math.max(1, Math.round(data.hp * swarmHp)); data.maxHp = data.hp;
-      // spawn ring away from the player at origin
-      const ang = rng.next() * Math.PI * 2, rad = 9 + rng.next() * 8;
-      const x = THREE.MathUtils.clamp(Math.cos(ang) * rad, -arena.halfW + 1.5, arena.halfW - 1.5);
-      const z = THREE.MathUtils.clamp(Math.sin(ang) * rad, -arena.halfD + 1.5, arena.halfD - 1.5);
+      // Spawn on a ring around the room's centre, then push away from wherever the
+      // player actually stands. The old version ringed the ORIGIN while the player
+      // spawns at the back of the room, so an enemy could appear on top of them -
+      // the first thing a new player experienced was being hit before they moved.
+      const safe = arena.spawnSafe ?? { x: 0, z: arena.halfD - 4 };
+      let x = 0, z = 0;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const ang = rng.next() * Math.PI * 2, rad = 9 + rng.next() * 8;
+        x = THREE.MathUtils.clamp(Math.cos(ang) * rad, -arena.halfW + 1.5, arena.halfW - 1.5);
+        z = THREE.MathUtils.clamp(Math.sin(ang) * rad, -arena.halfD + 1.5, arena.halfD - 1.5);
+        if (Math.hypot(x - safe.x, z - safe.z) >= 11) break;
+      }
       if (i < firstWave) this.spawn(data, x, z, elite);
       else deferred.push({ data, x, z, elite });
     });
